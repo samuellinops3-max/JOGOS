@@ -1,4 +1,4 @@
-// Cobra Arena - Controlo Dual (Setinhas + Analógico L3) para PS3 (PSL1GHT)
+// Pipa Combate 3D - PS3 (PSL1GHT) Versão Definitiva
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,29 +14,18 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
-#define WORLD  6000.0f
-#define MAXSEG 600
-#define NSN    14
-#define NPEL   900
-#define PI     3.14159265f
-
-typedef struct {
-    float x[MAXSEG], y[MAXSEG];
-    int len, alive, respawn, boost, grow, score, tick, immune;
-    float ang, tgt;
-    u32 col;
-} Snake;
+#define WORLD_W   1280.0f
+#define WORLD_H   720.0f
+#define MAX_ENEMIES 6
+#define PI        3.14159265f
 
 typedef struct {
     float x, y;
-    int size, active;
-    u32 col;
-} Pellet;
-
-static const u32 palette[8] = {
-    0x00FF4D4D, 0x0055D6FF, 0x0066FF66, 0x00FFD23F,
-    0x00C77DFF, 0x00FF8FAB, 0x0000E5C0, 0x00FF9F43
-};
+    float vx, vy;
+    float angle;
+    int active;
+    int score_val;
+} PipaBot;
 
 static gcmContextData *ctx;
 static u32 W, H;
@@ -45,6 +34,19 @@ static u32 fboff[2];
 static u32 *back;
 static int cur = 0, first_flip = 1;
 static volatile int running = 1;
+
+// Estado do Jogador (Pipa)
+static float player_x = 640.0f;
+static float player_y = 360.0f;
+static float player_vx = 0.0f;
+static float player_vy = 0.0f;
+static float player_angle = 0.0f;
+static int player_score = 0;
+static int player_line_pulled = 0; // Botão R1 (Puxar linha / Arrancada)
+static int player_cutting = 0;    // Botão X (Dar bote / Cortar)
+
+// Inimigos (Outras pipas no céu)
+static PipaBot enemies[MAX_ENEMIES];
 
 static void sysutil_cb(u64 status, u64 param, void *usrdata)
 {
@@ -119,20 +121,19 @@ static void fill_rect(int x, int y, int w, int h, u32 c)
     }
 }
 
-static void circle(int cx, int cy, int r, u32 c)
+static void draw_kite(int cx, int cy, float angle, u32 body_col, u32 tail_col)
 {
-    if (r < 1) r = 1;
-    if (cx + r < 0 || cx - r >= (int)W || cy + r < 0 || cy - r >= (int)H) return;
-    for (int dy = -r; dy <= r; dy++) {
-        int y = cy + dy;
-        if (y < 0 || y >= (int)H) continue;
-        int hw = (int)sqrtf((float)(r * r - dy * dy));
-        int x0 = cx - hw, x1 = cx + hw;
-        if (x0 < 0) x0 = 0;
-        if (x1 >= (int)W) x1 = W - 1;
-        u32 *p = back + y * W;
-        for (int x = x0; x <= x1; x++) p[x] = c;
+    // Desenha uma pipa estilizada em losango com rabiola simples
+    int size = 20;
+    // Rabiola (cauda) para baixo
+    for (int t = 1; t <= 6; t++) {
+        int tx = cx - (int)(sinf(angle) * t * 6);
+        int ty = cy + t * 8 + (int)(t * sinf(t) * 2);
+        fill_rect(tx - 1, ty - 1, 3, 3, tail_col);
     }
+    // Corpo da Pipa (Losango aproximado por blocos rápidos)
+    fill_rect(cx - 3, cy - size, 6, size * 2, body_col);
+    fill_rect(cx - size / 2, cy - 3, size, 6, body_col);
 }
 
 typedef struct { char c; const char *p; } Glyph;
@@ -142,13 +143,11 @@ static const Glyph glyphs[] = {
     {'4', "#.#" "#.#" "###" "..#" "..#"}, {'5', "###" "#.." "###" "..#" "###"},
     {'6', "###" "#.." "###" "#.#" "###"}, {'7', "###" "..#" "..#" "..#" "..#"},
     {'8', "###" "#.#" "###" "#.#" "###"}, {'9', "###" "#.#" "###" "..#" "###"},
-    {'A', ".#." "#.#" "###" "#.#" "#.#"}, {'B', "##." "#.#" "##." "#.#" "##."},
-    {'C', "###" "#.." "#.." "#.." "###"}, {'E', "###" "#.." "###" "#.." "###"},
-    {'G', "###" "#.." "#.#" "#.#" "###"}, {'M', "#.#" "###" "###" "#.#" "#.#"},
+    {'A', ".#." "#.#" "###" "#.#" "#.#"}, {'C', "###" "#.." "#.." "#.." "###"},
+    {'E', "###" "#.." "###" "#.." "###"}, {'I', "###" ".#." ".#." ".#." "###"},
     {'O', "###" "#.#" "#.#" "#.#" "###"}, {'P', "###" "#.#" "###" "#.." "#.."},
     {'R', "##." "#.#" "##." "#.#" "#.#"}, {'S', "###" "#.." "###" "..#" "###"},
     {'T', "###" ".#." ".#." ".#." ".#."}, {'U', "#.#" "#.#" "#.#" "#.#" "###"},
-    {'V', "#.#" "#.#" "#.#" "#.#" ".#."}, {'X', "#.#" "#.#" ".#." "#.#" "#.#"},
 };
 
 static const char *find_glyph(char c)
@@ -157,8 +156,6 @@ static const char *find_glyph(char c)
         if (glyphs[i].c == c) return glyphs[i].p;
     return NULL;
 }
-
-static int text_width(const char *s, int sc) { return (int)strlen(s) * 4 * sc - sc; }
 
 static void draw_text(const char *s, int x, int y, int sc, u32 c)
 {
@@ -172,338 +169,140 @@ static void draw_text(const char *s, int x, int y, int sc, u32 c)
     }
 }
 
-static Snake sn[NSN];
-static Pellet pel[NPEL];
-static int pelrot = 0, dead_t = 0, x_prev = 0;
-static float camx = WORLD / 2, camy = WORLD / 2;
-
-static float player_target_ang = 0.0f;
-static int p_boost = 0, p_x = 0;
-
-static float frand(void) { return (float)rand() / (float)RAND_MAX; }
-
-static float radius_of(const Snake *s)
-{
-    int l = s->len > 400 ? 400 : s->len;
-    return 12.0f + l * 0.05f;
-}
-
-static void add_pellet(float x, float y, int size)
-{
-    for (int k = 0; k < NPEL; k++) {
-        int i = (pelrot + k) % NPEL;
-        if (!pel[i].active) {
-            pel[i].x = x; pel[i].y = y; pel[i].size = size; pel[i].active = 1;
-            pel[i].col = palette[rand() % 8];
-            pelrot = (i + 1) % NPEL;
-            return;
-        }
-    }
-}
-
-static void spawn_snake(int i)
-{
-    Snake *s = &sn[i];
-    float x = 1500.0f + frand() * (WORLD - 3000.0f);
-    float y = 1500.0f + frand() * (WORLD - 3000.0f);
-    s->ang = frand() * 2 * PI;
-    s->tgt = s->ang;
-    
-    if (i == 0) {
-        s->len = 30;
-        s->immune = 180;
-    } else {
-        s->len = 25 + (rand() % 70);
-        s->immune = 0;
-    }
-
-    for (int j = 0; j < s->len; j++) {
-        s->x[j] = x - cosf(s->ang) * 5.0f * j;
-        s->y[j] = y - sinf(s->ang) * 5.0f * j;
-    }
-    s->alive = 1; s->respawn = 0; s->boost = 0; s->grow = 0; s->tick = 0;
-    s->col = palette[(i + rand()) % 8];
-}
-
-static void kill_snake(int i)
-{
-    Snake *s = &sn[i];
-    if (i == 0 && s->immune > 0) return;
-    for (int j = 0; j < s->len; j += 2)
-        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
-    s->alive = 0;
-    s->respawn = 180;
-    if (i == 0) dead_t = 0;
-}
-
-static void bot_think(int i)
-{
-    Snake *s = &sn[i];
-    float hx = s->x[0], hy = s->y[0];
-    s->tgt += (frand() - 0.5f) * 0.2f;
-
-    if (s->tick % 10 == 0) {
-        float best = 500.0f * 500.0f;
-        int bi = -1;
-        for (int k = 0; k < NPEL; k++) {
-            if (!pel[k].active) continue;
-            float dx = pel[k].x - hx, dy = pel[k].y - hy, d = dx * dx + dy * dy;
-            if (d < best) { best = d; bi = k; }
-        }
-        if (bi >= 0) s->tgt = atan2f(pel[bi].y - hy, pel[bi].x - hx);
-    }
-
-    if (hx < 500 || hx > WORLD - 500 || hy < 500 || hy > WORLD - 500)
-        s->tgt = atan2f(WORLD / 2 - hy, WORLD / 2 - hx);
-}
-
-static void update_snake(int i)
-{
-    Snake *s = &sn[i];
-    if (!s->alive) {
-        if (i > 0 && --s->respawn <= 0) spawn_snake(i);
-        return;
-    }
-    s->tick++;
-    if (s->immune > 0) s->immune--;
-
-    if (i == 0) {
-        s->tgt = player_target_ang;
-        s->boost = p_boost;
-    } else {
-        bot_think(i);
-        s->boost = (s->len > 40 && (s->tick / 180) % 4 == 0) ? 1 : 0;
-    }
-
-    float d = s->tgt - s->ang;
-    while (d > PI) d -= 2 * PI;
-    while (d < -PI) d += 2 * PI;
-    if (d > 0.08f) d = 0.08f;
-    if (d < -0.08f) d = -0.08f;
-    s->ang += d;
-
-    float sp = 3.5f;
-    if (s->boost && s->len > 15) {
-        sp = 6.0f;
-        if (s->tick % 10 == 0) {
-            s->len--;
-            add_pellet(s->x[s->len], s->y[s->len], 1);
-        }
-    }
-    s->x[0] += cosf(s->ang) * sp;
-    s->y[0] += sinf(s->ang) * sp;
-    
-    for (int iter = 0; iter < 2; iter++) {
-        for (int j = 1; j < s->len; j++) {
-            float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
-            float dd = sqrtf(dx * dx + dy * dy);
-            if (dd > 5.0f) {
-                float f = (dd - 5.0f) / dd;
-                s->x[j] += dx * f * 0.6f;
-                s->y[j] += dy * f * 0.6f;
-            }
-        }
-    }
-
-    if (s->x[0] < 0 || s->x[0] > WORLD || s->y[0] < 0 || s->y[0] > WORLD) { kill_snake(i); return; }
-
-    float rs = radius_of(s), er = rs + 14;
-    for (int k = 0; k < NPEL; k++) {
-        if (!pel[k].active) continue;
-        float dx = pel[k].x - s->x[0], dy = pel[k].y - s->y[0];
-        if (dx * dx + dy * dy < er * er) {
-            pel[k].active = 0;
-            int gain = pel[k].size;
-            s->grow += gain;
-            s->score += gain * 10;
-        }
-    }
-    while (s->grow >= 2 && s->len < MAXSEG) {
-        s->x[s->len] = s->x[s->len - 1];
-        s->y[s->len] = s->y[s->len - 1];
-        s->len++;
-        s->grow -= 2;
-    }
-    if (s->len >= MAXSEG) s->grow = 0;
-
-    if (s->immune > 0) return;
-
-    for (int o = 0; o < NSN; o++) {
-        if (o == i || !sn[o].alive) continue;
-        float lim = (rs + radius_of(&sn[o])) * 0.7f;
-        lim *= lim;
-        for (int j = 0; j < sn[o].len; j++) {
-            float dx = sn[o].x[j] - s->x[0], dy = sn[o].y[j] - s->y[0];
-            if (dx * dx + dy * dy < lim) { kill_snake(i); return; }
-        }
-    }
-}
-
 static void init_game(void)
 {
-    memset(pel, 0, sizeof(pel));
-    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
-    for (int i = 0; i < NSN; i++) { sn[i].score = 0; spawn_snake(i); }
-    dead_t = 0;
+    player_x = 640.0f;
+    player_y = 360.0f;
+    player_score = 0;
+
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        enemies[i].x = 100.0f + (rand() % 1080);
+        enemies[i].y = 100.0f + (rand() % 400);
+        enemies[i].vx = (rand() % 3 - 1) * 1.5f;
+        enemies[i].vy = (rand() % 3 - 1) * 1.0f;
+        enemies[i].active = 1;
+        enemies[i].score_val = 10 + (rand() % 20);
+    }
 }
 
 static void read_pad(void)
 {
     padInfo info;
     padData d;
-    p_boost = 0;
-    p_x = 0;
-    
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
-        
-        // 1. Prioridade às Setinhas (D-PAD) para controlo direto e sem falhas
-        int dpad_used = 0;
-        float target = player_target_ang;
-        
-        if (d.BTN_LEFT)  { target = PI;       dpad_used = 1; }
-        if (d.BTN_RIGHT) { target = 0.0f;     dpad_used = 1; }
-        if (d.BTN_UP)    { target = -PI / 2.0f; dpad_used = 1; }
-        if (d.BTN_DOWN)  { target = PI / 2.0f;  dpad_used = 1; }
 
-        if (dpad_used) {
-            player_target_ang = target;
-        } else {
-            // 2. Se as setinhas não forem usadas, lê o Analógico L3 com zona morta limpa
-            float ax = ((int)d.ANA_L_H - 128) / 128.0f;
-            float ay = ((int)d.ANA_L_V - 128) / 128.0f;
-            float mag = sqrtf(ax * ax + ay * ay);
-            if (mag > 0.18f) {
-                player_target_ang = atan2f(ay, ax);
-            }
-        }
-        
-        // Turbo exclusivamente no botão R1
-        if (d.BTN_R1) {
-            p_boost = 1;
-        } else {
-            p_boost = 0;
+        float move_x = 0.0f;
+        float move_y = 0.0f;
+
+        // 1. Controlo por Setinhas (D-PAD)
+        if (d.BTN_LEFT)  move_x = -1.0f;
+        if (d.BTN_RIGHT) move_x = 1.0f;
+        if (d.BTN_UP)    move_y = -1.0f;
+        if (d.BTN_DOWN)  move_y = 1.0f;
+
+        // 2. Controlo por Analógico L3 (com zona morta limpa)
+        float ax = ((int)d.ANA_L_H - 128) / 128.0f;
+        float ay = ((int)d.ANA_L_V - 128) / 128.0f;
+        if (fabsf(ax) > 0.15f || fabsf(ay) > 0.15f) {
+            move_x = ax;
+            move_y = ay;
         }
 
-        // Botão X apenas para renascer
-        if (d.BTN_CROSS) {
-            p_x = 1;
-        } else {
-            p_x = 0;
+        float speed = 4.0f;
+        player_line_pulled = d.BTN_R1 ? 1 : 0;
+        player_cutting = d.BTN_CROSS ? 1 : 0;
+
+        if (player_line_pulled) {
+            speed = 7.5f; // Puxada de linha / Arrancada
         }
+
+        player_vx = move_x * speed;
+        player_vy = move_y * speed;
+        player_angle = move_x * 0.4f; // Inclinação da pipa
     }
 }
 
 static void update_game(void)
 {
-    for (int i = 0; i < NSN; i++) update_snake(i);
+    // Atualiza posição do jogador com limites no ecrã
+    player_x += player_vx;
+    player_y += player_vy;
 
-    int count = 0;
-    for (int k = 0; k < NPEL; k++) count += pel[k].active;
-    for (int n = 0; n < 3 && count < NPEL - 50; n++, count++)
-        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
+    if (player_x < 50.0f) player_x = 50.0f;
+    if (player_x > WORLD_W - 50.0f) player_x = WORLD_W - 50.0f;
+    if (player_y < 50.0f) player_y = 50.0f;
+    if (player_y > WORLD_H - 100.0f) player_y = WORLD_H - 100.0f;
 
-    if (sn[0].alive) {
-        camx += (sn[0].x[0] - camx) * 0.2f;
-        camy += (sn[0].y[0] - camy) * 0.2f;
+    // Atualiza inimigos (pipas rivais a voar)
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!enemies[i].active) {
+            // Respawn da pipa inimiga após ser cortada
+            enemies[i].x = 100.0f + (rand() % 1080);
+            enemies[i].y = 50.0f + (rand() % 200);
+            enemies[i].active = 1;
+            continue;
+        }
+
+        enemies[i].x += enemies[i].vx;
+        enemies[i].y += enemies[i].vy;
+
+        // Movimento de vai e vem no vento
+        if (enemies[i].x < 50.0f || enemies[i].x > WORLD_W - 50.0f) enemies[i].vx *= -1.0f;
+        if (enemies[i].y < 40.0f || enemies[i].y > WORLD_H - 200.0f) enemies[i].vy *= -1.0f;
+
+        // Sistema de Combate / Corte (se o jogador estiver a dar bote 'X' e encostar na pipa rival)
+        float dx = enemies[i].x - player_x;
+        float dy = enemies[i].y - player_y;
+        float dist_sq = dx * dx + dy * dy;
+
+        if (dist_sq < (35.0f * 35.0f)) {
+            // Pipa cortada!
+            player_score += enemies[i].score_val;
+            enemies[i].active = 0; 
+        }
     }
-
-    if (!sn[0].alive) {
-        dead_t++;
-        if (dead_t > 60 && p_x && !x_prev) { spawn_snake(0); sn[0].score = 0; }
-    }
-    x_prev = p_x;
 }
 
 static void render(void)
 {
     float sc = (float)W / 1280.0f;
-    float hw = W / 2.0f, hh = H / 2.0f;
     u32 n = W * H;
-    for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
 
-    int sx0 = (int)((0 - camx) * sc + hw), sx1 = (int)((WORLD - camx) * sc + hw);
-    int sy0 = (int)((0 - camy) * sc + hh), sy1 = (int)((WORLD - camy) * sc + hh);
-    u32 red = 0x004A0E15;
-    if (sx0 > 0) fill_rect(0, 0, sx0, H, red);
-    if (sx1 < (int)W) fill_rect(sx1, 0, W - sx1, H, red);
-    if (sy0 > 0) fill_rect(0, 0, W, sy0, red);
-    if (sy1 < (int)H) fill_rect(0, sy1, W, H - sy1, red);
+    // 1. Céu azul degradê simulado (fundo)
+    for (u32 i = 0; i < n; i++) back[i] = 0x003388EE;
 
-    float gx0 = floorf((camx - hw / sc) / 120.0f) * 120.0f;
-    float gy0 = floorf((camy - hh / sc) / 120.0f) * 120.0f;
-    for (float gx = gx0; gx < camx + hw / sc; gx += 120.0f) {
-        if (gx < 0 || gx > WORLD) continue;
-        for (float gy = gy0; gy < camy + hh / sc; gy += 120.0f) {
-            if (gy < 0 || gy > WORLD) continue;
-            fill_rect((int)((gx - camx) * sc + hw), (int)((gy - camy) * sc + hh), 3, 3, 0x001A2636);
-        }
+    // Nuvens simples de fundo fixas
+    fill_rect(100, 80, 180, 40, 0x0088CCFF);
+    fill_rect(850, 120, 220, 50, 0x0088CCFF);
+    fill_rect(500, 60, 150, 35, 0x0088CCFF);
+
+    // Linha da pipa do jogador (ligada à base inferior central do ecrã)
+    int base_origin_x = (int)W / 2;
+    int base_origin_y = (int)H;
+    int p_draw_x = (int)(player_x * sc);
+    int p_draw_y = (int)(player_y * sc);
+
+    // Desenha as pipas inimigas
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!enemies[i].active) continue;
+        int ex = (int)(enemies[i].x * sc);
+        int ey = (int)(enemies[i].y * sc);
+        draw_kite(ex, ey, 0.0f, 0x00FF3333, 0x00FFFF33); // Pipa vermelha inimiga
     }
 
-    for (int k = 0; k < NPEL; k++) {
-        if (!pel[k].active) continue;
-        int px = (int)((pel[k].x - camx) * sc + hw);
-        int py = (int)((pel[k].y - camy) * sc + hh);
-        if (px >= -15 && px < (int)W + 15 && py >= -15 && py < (int)H + 15) {
-            circle(px, py, (int)((4 + pel[k].size * 2) * sc), pel[k].col);
-            circle(px, py, (int)(2 * sc), 0x00FFFFFF);
-        }
-    }
+    // Desenha a Pipa do Jogador
+    draw_kite(p_draw_x, p_draw_y, player_angle, 0x0000FFCC, 0x00FF33FF); // Pipa ciano/azul do jogador
 
-    for (int i = NSN - 1; i >= 0; i--) {
-        Snake *s = &sn[i];
-        if (!s->alive) continue;
-        int r = (int)(radius_of(s) * sc);
-        u32 dark = (s->col >> 1) & 0x007F7F7F;
-        
-        for (int j = s->len - 1; j >= 0; j--) {
-            int px = (int)((s->x[j] - camx) * sc + hw);
-            int py = (int)((s->y[j] - camy) * sc + hh);
-            circle(px, py, r, (j % 4 < 2) ? s->col : dark);
-        }
-        
-        int hx = (int)((s->x[0] - camx) * sc + hw);
-        int hy = (int)((s->y[0] - camy) * sc + hh);
-        circle(hx, hy, r + 1, s->col);
-        for (int e = -1; e <= 1; e += 2) {
-            int ex = hx + (int)(cosf(s->ang + e * 0.7f) * r * 0.65f);
-            int ey = hy + (int)(sinf(s->ang + e * 0.7f) * r * 0.65f);
-            circle(ex, ey, r * 38 / 100 + 1, 0x00FFFFFF);
-            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 18 / 100 + 1, 0x00000000);
-        }
-    }
-
-    int m_w = 160, m_h = 160;
-    int m_x = (int)W - m_w - 24, m_y = 24;
-    fill_rect(m_x - 2, m_y - 2, m_w + 4, m_h + 4, 0x00FFFFFF);
-    fill_rect(m_x, m_y, m_w, m_h, 0x00141D2B);
-
-    for (int i = 0; i < NSN; i++) {
-        if (!sn[i].alive) continue;
-        int mx = m_x + (int)((sn[i].x[0] / WORLD) * m_w);
-        int my = m_y + (int)((sn[i].y[0] / WORLD) * m_h);
-        u32 mcol = (i == 0) ? 0x0055D6FF : 0x00FF4D4D;
-        fill_rect(mx - 1, my - 1, 3, 3, mcol);
-    }
-
+    // HUD / Placar no canto superior
     char buf[32];
-    int ui = (int)(4 * sc + 0.5f);
-    if (ui < 3) ui = 3;
+    int ui = 4;
+    draw_text("PIPA COMBATE 3D", 30, 20, ui, 0x00FFFFFF);
+    sprintf(buf, "PONTOS: %d", player_score);
+    draw_text(buf, 30, 50, ui, 0x00FFD23F);
 
-    draw_text("SCORE", 24, 20, ui, 0x0055D6FF);
-    sprintf(buf, "%d", sn[0].score);
-    draw_text(buf, 24, 20 + 7 * ui, ui + 2, 0x00FFD23F);
-
-    draw_text("R1: TURBO  |  SETINHAS OU L3: MOVER", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
-
-    if (!sn[0].alive) {
-        int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
-        fill_rect((int)W / 2 - bw / 2, (int)H / 2 - bh / 2, bw, bh, 0x00000000);
-        draw_text("GAME OVER", (int)W / 2 - text_width("GAME OVER", ui * 2) / 2, (int)H / 2 - bh / 2 + 24, ui * 2, 0x00FF4D4D);
-        if (dead_t > 60)
-            draw_text("PRESS X TO RESPAWN", (int)W / 2 - text_width("PRESS X TO RESPAWN", ui) / 2, (int)H / 2 + ui * 3, ui, 0x00FFFFFF);
-    }
+    draw_text("R1: PUXAR LINHA  |  X: CORTAR  |  SETINHAS / L3: MOVER", 30, (int)H - 40, 2, 0x00FFFF00);
 }
 
 int main(int argc, char **argv)
