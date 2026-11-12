@@ -1,4 +1,4 @@
-// Cobra Arena - estilo slither.io para PS3 (PSL1GHT)
+// Cobra Arena - 2 Player Co-op & Food Style para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,11 +14,10 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
-#define WORLD  6000.0f  // Mapa maior e mais espaçoso
-#define MAXSEG 500      // Capacidade máxima de segmentos para cobras maiores
-#define NSN    12       // Mais cobras na arena
-#define NPEL   700      // Mais pellets espalhados
-#define SP     6.5f     // Velocidade base
+#define WORLD  6000.0f
+#define MAXSEG 500
+#define NSN    14       // Jogador 1, Jogador 2 + 12 Bots
+#define NPEL   700
 #define PI     3.14159265f
 
 typedef struct {
@@ -30,7 +29,7 @@ typedef struct {
 
 typedef struct {
     float x, y;
-    int size, active;
+    int size, active, type; // type 0 = fruta, type 1 = bolo especial
     u32 col;
 } Pellet;
 
@@ -179,10 +178,14 @@ static void draw_text(const char *s, int x, int y, int sc, u32 c)
 /* ---------- jogo ---------- */
 static Snake sn[NSN];
 static Pellet pel[NPEL];
-static int pelrot = 0, dead_t = 0, x_prev = 0;
+static int pelrot = 0, dead_t1 = 0, dead_t2 = 0, x_prev1 = 0, x_prev2 = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
-static float pad_ax = 0, pad_ay = 0, pad_mag = 0;
-static int pad_boost = 0, pad_x = 0;
+
+// Controlos P1 e P2
+static float p1_ax = 0, p1_ay = 0, p1_mag = 0;
+static int p1_boost = 0, p1_x = 0;
+static float p2_ax = 0, p2_ay = 0, p2_mag = 0;
+static int p2_boost = 0, p2_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
@@ -192,13 +195,14 @@ static float radius_of(const Snake *s)
     return 11.0f + l * 0.04f;
 }
 
-static void add_pellet(float x, float y, int size)
+static void add_pellet(float x, float y, int size, int type)
 {
     for (int k = 0; k < NPEL; k++) {
         int i = (pelrot + k) % NPEL;
         if (!pel[i].active) {
             pel[i].x = x; pel[i].y = y; pel[i].size = size; pel[i].active = 1;
-            pel[i].col = palette[rand() % 8];
+            pel[i].type = type;
+            pel[i].col = type == 1 ? 0x00FFD23F : palette[rand() % 8];
             pelrot = (i + 1) % NPEL;
             return;
         }
@@ -213,10 +217,10 @@ static void spawn_snake(int i)
     s->ang = frand() * 2 * PI;
     s->tgt = s->ang;
     
-    if (i == 0) {
-        s->len = 25;
+    if (i == 0 || i == 1) {
+        s->len = 25; // Jogadores 1 e 2 começam fortes
     } else {
-        s->len = 20 + (rand() % 70);
+        s->len = 20 + (rand() % 70); // Bots variados
     }
 
     for (int j = 0; j < s->len; j++) {
@@ -231,10 +235,11 @@ static void kill_snake(int i)
 {
     Snake *s = &sn[i];
     for (int j = 0; j < s->len; j += 2)
-        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
+        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2, rand() % 5 == 0 ? 1 : 0);
     s->alive = 0;
     s->respawn = 180;
-    if (i == 0) dead_t = 0;
+    if (i == 0) dead_t1 = 0;
+    if (i == 1) dead_t2 = 0;
 }
 
 static void bot_think(int i)
@@ -262,13 +267,17 @@ static void update_snake(int i)
 {
     Snake *s = &sn[i];
     if (!s->alive) {
-        if (i > 0 && --s->respawn <= 0) spawn_snake(i);
+        if (i > 1 && --s->respawn <= 0) spawn_snake(i);
         return;
     }
     s->tick++;
+    
     if (i == 0) {
-        if (pad_mag > 0.15f) s->tgt = atan2f(pad_ay, pad_ax);
-        s->boost = pad_boost;
+        if (p1_mag > 0.15f) s->tgt = atan2f(p1_ay, p1_ax);
+        s->boost = p1_boost;
+    } else if (i == 1) {
+        if (p2_mag > 0.15f) s->tgt = atan2f(p2_ay, p2_ax);
+        s->boost = p2_boost;
     } else {
         bot_think(i);
         s->boost = (s->len > 40 && (s->tick / 120) % 4 == 0) ? 1 : 0;
@@ -286,7 +295,7 @@ static void update_snake(int i)
         sp = 5.8f;
         if (s->tick % 8 == 0) {
             s->len--;
-            add_pellet(s->x[s->len], s->y[s->len], 1);
+            add_pellet(s->x[s->len], s->y[s->len], 1, 0);
         }
     }
     s->x[0] += cosf(s->ang) * sp;
@@ -310,8 +319,9 @@ static void update_snake(int i)
         float dx = pel[k].x - s->x[0], dy = pel[k].y - s->y[0];
         if (dx * dx + dy * dy < er * er) {
             pel[k].active = 0;
-            s->grow += pel[k].size;
-            s->score += pel[k].size * 10;
+            int gain = pel[k].type == 1 ? 5 : pel[k].size;
+            s->grow += gain;
+            s->score += gain * 10;
         }
     }
     while (s->grow >= 2 && s->len < MAXSEG) {
@@ -322,8 +332,13 @@ static void update_snake(int i)
     }
     if (s->len >= MAXSEG) s->grow = 0;
 
+    // Colisão com outras cobras (P1 e P2 SÃO AMIGOS E NÃO SE MATAM)
     for (int o = 0; o < NSN; o++) {
         if (o == i || !sn[o].alive) continue;
+        
+        // Se ambos são jogadores (0 e 1), ignoram a colisão entre si (são amigos!)
+        if ((i == 0 && o == 1) || (i == 1 && o == 0)) continue;
+
         float lim = (rs + radius_of(&sn[o])) * 0.7f;
         lim *= lim;
         for (int j = 0; j < sn[o].len; j++) {
@@ -336,31 +351,44 @@ static void update_snake(int i)
 static void init_game(void)
 {
     memset(pel, 0, sizeof(pel));
-    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
+    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0), rand() % 8 == 0 ? 1 : 0);
     for (int i = 0; i < NSN; i++) { sn[i].score = 0; spawn_snake(i); }
-    dead_t = 0;
+    dead_t1 = dead_t2 = 0;
 }
 
 static void read_pad(void)
 {
     padInfo info;
-    padData d;
-    pad_ax = pad_ay = pad_mag = 0;
-    pad_boost = pad_x = 0;
+    padData d1, d2;
+    p1_ax = p1_ay = p1_mag = 0; p1_boost = p1_x = 0;
+    p2_ax = p2_ay = p2_mag = 0; p2_boost = p2_x = 0;
+    
     ioPadGetInfo(&info);
+    
+    // Comando 1 (Jogador 1)
     if (info.status[0]) {
-        ioPadGetData(0, &d);
-        float ax = ((int)d.ANA_L_H - 128) / 128.0f;
-        float ay = ((int)d.ANA_L_V - 128) / 128.0f;
-        if (d.BTN_LEFT) ax = -1;
-        if (d.BTN_RIGHT) ax = 1;
-        if (d.BTN_UP) ay = -1;
-        if (d.BTN_DOWN) ay = 1;
-        
-        pad_ax = ax; pad_ay = ay;
-        pad_mag = sqrtf(ax * ax + ay * ay);
-        pad_boost = d.BTN_CROSS;
-        pad_x = d.BTN_CROSS;
+        ioPadGetData(0, &d1);
+        float ax = ((int)d1.ANA_L_H - 128) / 128.0f;
+        float ay = ((int)d1.ANA_L_V - 128) / 128.0f;
+        if (d1.BTN_LEFT) ax = -1; if (d1.BTN_RIGHT) ax = 1;
+        if (d1.BTN_UP) ay = -1; if (d1.BTN_DOWN) ay = 1;
+        p1_ax = ax; p1_ay = ay;
+        p1_mag = sqrtf(ax * ax + ay * ay);
+        p1_boost = d1.BTN_CROSS;
+        p1_x = d1.BTN_CROSS;
+    }
+    
+    // Comando 2 (Jogador 2)
+    if (info.status[1]) {
+        ioPadGetData(1, &d2);
+        float ax = ((int)d2.ANA_L_H - 128) / 128.0f;
+        float ay = ((int)d2.ANA_L_V - 128) / 128.0f;
+        if (d2.BTN_LEFT) ax = -1; if (d2.BTN_RIGHT) ax = 1;
+        if (d2.BTN_UP) ay = -1; if (d2.BTN_DOWN) ay = 1;
+        p2_ax = ax; p2_ay = ay;
+        p2_mag = sqrtf(ax * ax + ay * ay);
+        p2_boost = d2.BTN_CROSS;
+        p2_x = d2.BTN_CROSS;
     }
 }
 
@@ -371,19 +399,28 @@ static void update_game(void)
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
     for (int n = 0; n < 3 && count < NPEL - 50; n++, count++)
-        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
+        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0), rand() % 8 == 0 ? 1 : 0);
 
+    // Câmara foca no P1 se vivo, senão no P2
     if (sn[0].alive) {
         camx = sn[0].x[0];
         camy = sn[0].y[0];
-    } else {
-        dead_t++;
-        if (dead_t > 60 && pad_x && !x_prev) {
-            spawn_snake(0);
-            sn[0].score = 0;
-        }
+    } else if (sn[1].alive) {
+        camx = sn[1].x[0];
+        camy = sn[1].y[0];
     }
-    x_prev = pad_x;
+
+    if (!sn[0].alive) {
+        dead_t1++;
+        if (dead_t1 > 60 && p1_x && !x_prev1) { spawn_snake(0); sn[0].score = 0; }
+    }
+    x_prev1 = p1_x;
+
+    if (!sn[1].alive) {
+        dead_t2++;
+        if (dead_t2 > 60 && p2_x && !x_prev2) { spawn_snake(1); sn[1].score = 0; }
+    }
+    x_prev2 = p2_x;
 }
 
 static void render(void)
@@ -411,12 +448,25 @@ static void render(void)
         }
     }
 
+    /* Desenhar Comida / Bolos com aspeto visual divertido */
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
-        circle(px, py, (int)((3 + pel[k].size * 2) * sc), pel[k].col);
+        if (px < -20 || px > (int)W + 20 || py < -20 || py > (int)H + 20) continue;
+        
+        if (pel[k].type == 1) {
+            // Desenho de um mini bolo especial dourado
+            fill_rect(px - 4, py - 2, 8, 5, 0x00FFD23F);
+            fill_rect(px - 5, py - 4, 10, 2, 0x00FFFFFF);
+            fill_rect(px - 1, py - 7, 2, 3, 0x00FF4D4D); // Vela do bolo
+        } else {
+            // Desenho de uma guloseima / fruta colorida
+            circle(px, py, (int)(4 * sc), pel[k].col);
+            fill_rect(px - 1, py - 1, 2, 2, 0x00FFFFFF); // Brilho
+        }
     }
 
+    /* Desenhar Cobras */
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
@@ -438,20 +488,30 @@ static void render(void)
         }
     }
 
+    /* HUD (Placares P1 e P2) */
     char buf[32];
     int ui = (int)(4 * sc + 0.5f);
     if (ui < 3) ui = 3;
-    draw_text("SCORE", 24, 20, ui, 0x00FFFFFF);
+
+    // Jogador 1 HUD
+    draw_text("P1 SCORE", 24, 20, ui, 0x0055D6FF);
     sprintf(buf, "%d", sn[0].score);
     draw_text(buf, 24, 20 + 7 * ui, ui + 2, 0x00FFD23F);
-    draw_text("X: TURBO", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
 
+    // Jogador 2 HUD
+    draw_text("P2 SCORE", (int)W - 160, 20, ui, 0x00FF8FAB);
+    sprintf(buf, "%d", sn[1].score);
+    draw_text(buf, (int)W - 160, 20 + 7 * ui, ui + 2, 0x00FFD23F);
+
+    draw_text("X: TURBO (P1 & P2)", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
+
+    // Game Over P1
     if (!sn[0].alive) {
-        int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
-        fill_rect((int)W / 2 - bw / 2, (int)H / 2 - bh / 2, bw, bh, 0x00000000);
-        draw_text("GAME OVER", (int)W / 2 - text_width("GAME OVER", ui * 2) / 2, (int)H / 2 - bh / 2 + 24, ui * 2, 0x00FF4D4D);
-        if (dead_t > 60)
-            draw_text("PRESS X TO RESPAWN", (int)W / 2 - text_width("PRESS X TO RESPAWN", ui) / 2, (int)H / 2 + ui * 3, ui, 0x00FFFFFF);
+        draw_text("P1 DOWN - PRESS X", (int)W / 2 - text_width("P1 DOWN - PRESS X", ui) / 2, (int)H / 2 - 40, ui, 0x00FF4D4D);
+    }
+    // Game Over P2
+    if (!sn[1].alive) {
+        draw_text("P2 DOWN - PRESS X", (int)W / 2 - text_width("P2 DOWN - PRESS X", ui) / 2, (int)H / 2 - 10, ui, 0x00FF4D4D);
     }
 }
 
