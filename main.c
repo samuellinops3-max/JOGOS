@@ -1,4 +1,4 @@
-// Cobra Arena - 2 Player Co-op & Food Style para PS3 (PSL1GHT)
+// Cobra Arena - 2 Player Co-op & Fixed Render para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +17,7 @@
 #define WORLD  6000.0f
 #define MAXSEG 500
 #define NSN    14       // Jogador 1, Jogador 2 + 12 Bots
-#define NPEL   700
+#define NPEL   600
 #define PI     3.14159265f
 
 typedef struct {
@@ -29,7 +29,7 @@ typedef struct {
 
 typedef struct {
     float x, y;
-    int size, active, type; // type 0 = fruta, type 1 = bolo especial
+    int size, active;
     u32 col;
 } Pellet;
 
@@ -195,14 +195,13 @@ static float radius_of(const Snake *s)
     return 11.0f + l * 0.04f;
 }
 
-static void add_pellet(float x, float y, int size, int type)
+static void add_pellet(float x, float y, int size)
 {
     for (int k = 0; k < NPEL; k++) {
         int i = (pelrot + k) % NPEL;
         if (!pel[i].active) {
             pel[i].x = x; pel[i].y = y; pel[i].size = size; pel[i].active = 1;
-            pel[i].type = type;
-            pel[i].col = type == 1 ? 0x00FFD23F : palette[rand() % 8];
+            pel[i].col = palette[rand() % 8];
             pelrot = (i + 1) % NPEL;
             return;
         }
@@ -212,15 +211,15 @@ static void add_pellet(float x, float y, int size, int type)
 static void spawn_snake(int i)
 {
     Snake *s = &sn[i];
-    float x = 800.0f + frand() * (WORLD - 1600.0f);
-    float y = 800.0f + frand() * (WORLD - 1600.0f);
+    float x = 1000.0f + frand() * (WORLD - 2000.0f);
+    float y = 1000.0f + frand() * (WORLD - 2000.0f);
     s->ang = frand() * 2 * PI;
     s->tgt = s->ang;
     
     if (i == 0 || i == 1) {
-        s->len = 25; // Jogadores 1 e 2 começam fortes
+        s->len = 30; // P1 e P2 começam fortes
     } else {
-        s->len = 20 + (rand() % 70); // Bots variados
+        s->len = 20 + (rand() % 60);
     }
 
     for (int j = 0; j < s->len; j++) {
@@ -235,7 +234,7 @@ static void kill_snake(int i)
 {
     Snake *s = &sn[i];
     for (int j = 0; j < s->len; j += 2)
-        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2, rand() % 5 == 0 ? 1 : 0);
+        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
     s->alive = 0;
     s->respawn = 180;
     if (i == 0) dead_t1 = 0;
@@ -259,7 +258,7 @@ static void bot_think(int i)
         if (bi >= 0) s->tgt = atan2f(pel[bi].y - hy, pel[bi].x - hx);
     }
 
-    if (hx < 400 || hx > WORLD - 400 || hy < 400 || hy > WORLD - 400)
+    if (hx < 500 || hx > WORLD - 500 || hy < 500 || hy > WORLD - 500)
         s->tgt = atan2f(WORLD / 2 - hy, WORLD / 2 - hx);
 }
 
@@ -273,10 +272,10 @@ static void update_snake(int i)
     s->tick++;
     
     if (i == 0) {
-        if (p1_mag > 0.15f) s->tgt = atan2f(p1_ay, p1_ax);
+        if (p1_mag > 0.15f) s->tgt = atan2f(p1_ay, p1_ax); // Mantém direção anterior se soltar o analógico
         s->boost = p1_boost;
     } else if (i == 1) {
-        if (p2_mag > 0.15f) s->tgt = atan2f(p2_ay, p2_ax);
+        if (p2_mag > 0.15f) s->tgt = atan2f(p2_ay, p2_ax); // Mantém direção anterior se soltar o analógico
         s->boost = p2_boost;
     } else {
         bot_think(i);
@@ -290,12 +289,12 @@ static void update_snake(int i)
     if (d < -0.08f) d = -0.08f;
     s->ang += d;
 
-    float sp = 3.2f;
+    float sp = 3.5f;
     if (s->boost && s->len > 15) {
-        sp = 5.8f;
+        sp = 6.0f;
         if (s->tick % 8 == 0) {
             s->len--;
-            add_pellet(s->x[s->len], s->y[s->len], 1, 0);
+            add_pellet(s->x[s->len], s->y[s->len], 1);
         }
     }
     s->x[0] += cosf(s->ang) * sp;
@@ -319,9 +318,8 @@ static void update_snake(int i)
         float dx = pel[k].x - s->x[0], dy = pel[k].y - s->y[0];
         if (dx * dx + dy * dy < er * er) {
             pel[k].active = 0;
-            int gain = pel[k].type == 1 ? 5 : pel[k].size;
-            s->grow += gain;
-            s->score += gain * 10;
+            s->grow += pel[k].size;
+            s->score += pel[k].size * 10;
         }
     }
     while (s->grow >= 2 && s->len < MAXSEG) {
@@ -332,11 +330,9 @@ static void update_snake(int i)
     }
     if (s->len >= MAXSEG) s->grow = 0;
 
-    // Colisão com outras cobras (P1 e P2 SÃO AMIGOS E NÃO SE MATAM)
+    // Colisão (P1 e P2 são AMIGOS e não colidem entre si)
     for (int o = 0; o < NSN; o++) {
         if (o == i || !sn[o].alive) continue;
-        
-        // Se ambos são jogadores (0 e 1), ignoram a colisão entre si (são amigos!)
         if ((i == 0 && o == 1) || (i == 1 && o == 0)) continue;
 
         float lim = (rs + radius_of(&sn[o])) * 0.7f;
@@ -351,7 +347,7 @@ static void update_snake(int i)
 static void init_game(void)
 {
     memset(pel, 0, sizeof(pel));
-    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0), rand() % 8 == 0 ? 1 : 0);
+    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
     for (int i = 0; i < NSN; i++) { sn[i].score = 0; spawn_snake(i); }
     dead_t1 = dead_t2 = 0;
 }
@@ -360,8 +356,8 @@ static void read_pad(void)
 {
     padInfo info;
     padData d1, d2;
-    p1_ax = p1_ay = p1_mag = 0; p1_boost = p1_x = 0;
-    p2_ax = p2_ay = p2_mag = 0; p2_boost = p2_x = 0;
+    p1_boost = p1_x = 0;
+    p2_boost = p2_x = 0;
     
     ioPadGetInfo(&info);
     
@@ -372,8 +368,13 @@ static void read_pad(void)
         float ay = ((int)d1.ANA_L_V - 128) / 128.0f;
         if (d1.BTN_LEFT) ax = -1; if (d1.BTN_RIGHT) ax = 1;
         if (d1.BTN_UP) ay = -1; if (d1.BTN_DOWN) ay = 1;
-        p1_ax = ax; p1_ay = ay;
-        p1_mag = sqrtf(ax * ax + ay * ay);
+        
+        float mag = sqrtf(ax * ax + ay * ay);
+        if (mag > 0.15f) {
+            p1_ax = ax; p1_ay = ay; p1_mag = mag;
+        } else {
+            p1_mag = 0;
+        }
         p1_boost = d1.BTN_CROSS;
         p1_x = d1.BTN_CROSS;
     }
@@ -385,8 +386,13 @@ static void read_pad(void)
         float ay = ((int)d2.ANA_L_V - 128) / 128.0f;
         if (d2.BTN_LEFT) ax = -1; if (d2.BTN_RIGHT) ax = 1;
         if (d2.BTN_UP) ay = -1; if (d2.BTN_DOWN) ay = 1;
-        p2_ax = ax; p2_ay = ay;
-        p2_mag = sqrtf(ax * ax + ay * ay);
+        
+        float mag = sqrtf(ax * ax + ay * ay);
+        if (mag > 0.15f) {
+            p2_ax = ax; p2_ay = ay; p2_mag = mag;
+        } else {
+            p2_mag = 0;
+        }
         p2_boost = d2.BTN_CROSS;
         p2_x = d2.BTN_CROSS;
     }
@@ -399,9 +405,8 @@ static void update_game(void)
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
     for (int n = 0; n < 3 && count < NPEL - 50; n++, count++)
-        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0), rand() % 8 == 0 ? 1 : 0);
+        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
 
-    // Câmara foca no P1 se vivo, senão no P2
     if (sn[0].alive) {
         camx = sn[0].x[0];
         camy = sn[0].y[0];
@@ -430,6 +435,7 @@ static void render(void)
     u32 n = W * H;
     for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
 
+    // Bordas vermelhas da arena
     int sx0 = (int)((0 - camx) * sc + hw), sx1 = (int)((WORLD - camx) * sc + hw);
     int sy0 = (int)((0 - camy) * sc + hh), sy1 = (int)((WORLD - camy) * sc + hh);
     u32 red = 0x004A0E15;
@@ -438,6 +444,7 @@ static void render(void)
     if (sy0 > 0) fill_rect(0, 0, W, sy0, red);
     if (sy1 < (int)H) fill_rect(0, sy1, W, H - sy1, red);
 
+    // Grelha do mapa
     float gx0 = floorf((camx - hw / sc) / 120.0f) * 120.0f;
     float gy0 = floorf((camy - hh / sc) / 120.0f) * 120.0f;
     for (float gx = gx0; gx < camx + hw / sc; gx += 120.0f) {
@@ -448,25 +455,18 @@ static void render(void)
         }
     }
 
-    /* Desenhar Comida / Bolos com aspeto visual divertido */
+    // Desenhar Comida / Guloseimas (Estável e Brilhante)
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
-        int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
-        if (px < -20 || px > (int)W + 20 || py < -20 || py > (int)H + 20) continue;
-        
-        if (pel[k].type == 1) {
-            // Desenho de um mini bolo especial dourado
-            fill_rect(px - 4, py - 2, 8, 5, 0x00FFD23F);
-            fill_rect(px - 5, py - 4, 10, 2, 0x00FFFFFF);
-            fill_rect(px - 1, py - 7, 2, 3, 0x00FF4D4D); // Vela do bolo
-        } else {
-            // Desenho de uma guloseima / fruta colorida
-            circle(px, py, (int)(4 * sc), pel[k].col);
-            fill_rect(px - 1, py - 1, 2, 2, 0x00FFFFFF); // Brilho
+        int px = (int)((pel[k].x - camx) * sc + hw);
+        int py = (int)((pel[k].y - camy) * sc + hh);
+        if (px >= 0 && px < (int)W && py >= 0 && py < (int)H) {
+            circle(px, py, (int)((4 + pel[k].size * 2) * sc), pel[k].col);
+            circle(px, py, (int)(2 * sc), 0x00FFFFFF); // Brilho central
         }
     }
 
-    /* Desenhar Cobras */
+    // Desenhar Cobras (P1, P2 e Bots)
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
@@ -474,11 +474,13 @@ static void render(void)
         u32 dark = (s->col >> 1) & 0x007F7F7F;
         
         for (int j = s->len - 1; j >= 0; j--) {
-            int px = (int)((s->x[j] - camx) * sc + hw), py = (int)((s->y[j] - camy) * sc + hh);
+            int px = (int)((s->x[j] - camx) * sc + hw);
+            int py = (int)((s->y[j] - camy) * sc + hh);
             circle(px, py, r, (j % 4 < 2) ? s->col : dark);
         }
         
-        int hx = (int)((s->x[0] - camx) * sc + hw), hy = (int)((s->y[0] - camy) * sc + hh);
+        int hx = (int)((s->x[0] - camx) * sc + hw);
+        int hy = (int)((s->y[0] - camy) * sc + hh);
         circle(hx, hy, r + 1, s->col);
         for (int e = -1; e <= 1; e += 2) {
             int ex = hx + (int)(cosf(s->ang + e * 0.7f) * r * 0.65f);
@@ -488,28 +490,24 @@ static void render(void)
         }
     }
 
-    /* HUD (Placares P1 e P2) */
+    // HUD
     char buf[32];
     int ui = (int)(4 * sc + 0.5f);
     if (ui < 3) ui = 3;
 
-    // Jogador 1 HUD
     draw_text("P1 SCORE", 24, 20, ui, 0x0055D6FF);
     sprintf(buf, "%d", sn[0].score);
     draw_text(buf, 24, 20 + 7 * ui, ui + 2, 0x00FFD23F);
 
-    // Jogador 2 HUD
     draw_text("P2 SCORE", (int)W - 160, 20, ui, 0x00FF8FAB);
     sprintf(buf, "%d", sn[1].score);
     draw_text(buf, (int)W - 160, 20 + 7 * ui, ui + 2, 0x00FFD23F);
 
-    draw_text("X: TURBO (P1 & P2)", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
+    draw_text("X: TURBO", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
 
-    // Game Over P1
     if (!sn[0].alive) {
         draw_text("P1 DOWN - PRESS X", (int)W / 2 - text_width("P1 DOWN - PRESS X", ui) / 2, (int)H / 2 - 40, ui, 0x00FF4D4D);
     }
-    // Game Over P2
     if (!sn[1].alive) {
         draw_text("P2 DOWN - PRESS X", (int)W / 2 - text_width("P2 DOWN - PRESS X", ui) / 2, (int)H / 2 - 10, ui, 0x00FF4D4D);
     }
