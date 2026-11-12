@@ -1,4 +1,4 @@
-// Cobra Arena - Estilo Slither.io Otimizado para PS3 (PSL1GHT)
+// Cobra Arena - Otimizado para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +17,7 @@
 #define WORLD  6000.0f
 #define MAXSEG 500
 #define NSN    12
-#define NPEL   1200     // Muito mais comida espalhada pelo mapa
+#define NPEL   1200
 #define PI     3.14159265f
 
 typedef struct {
@@ -181,7 +181,6 @@ static int pad_boost = 0, pad_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
-// Raio maior para as cobras ficarem bem gordas e encorpadas como no Slither.io
 static float radius_of(const Snake *s)
 {
     int l = s->len > 300 ? 300 : s->len;
@@ -346,15 +345,28 @@ static void read_pad(void)
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
-        float ax = ((int)d.ANA_L_H - 128) / 128.0f;
-        float ay = ((int)d.ANA_L_V - 128) / 128.0f;
-        if (d.BTN_LEFT) ax = -1;
-        if (d.BTN_RIGHT) ax = 1;
-        if (d.BTN_UP) ay = -1;
-        if (d.BTN_DOWN) ay = 1;
         
-        pad_ax = ax; pad_ay = ay;
+        // Leitura prioritária e direta pelo D-PAD (funciona em qualquer comando paralelo/Paraguai)
+        float ax = 0, ay = 0;
+        if (d.BTN_LEFT)  ax = -1.0f;
+        if (d.BTN_RIGHT) ax =  1.0f;
+        if (d.BTN_UP)    ay = -1.0f;
+        if (d.BTN_DOWN)  ay =  1.0f;
+        
+        // Se o D-Pad não estiver a ser usado, usa o analógico com margem segura
+        if (ax == 0 && ay == 0) {
+            float al_h = ((int)d.ANA_L_H - 128) / 128.0f;
+            float al_v = ((int)d.ANA_L_V - 128) / 128.0f;
+            if (al_h > 0.25f || al_h < -0.25f || al_v > 0.25f || al_v < -0.25f) {
+                ax = al_h;
+                ay = al_v;
+            }
+        }
+        
+        pad_ax = ax; 
+        pad_ay = ay;
         pad_mag = sqrtf(ax * ax + ay * ay);
+        if (pad_mag > 1.0f) pad_mag = 1.0f;
         
         pad_boost = d.BTN_CROSS;
         pad_x = d.BTN_CROSS;
@@ -365,7 +377,6 @@ static void update_game(void)
 {
     for (int i = 0; i < NSN; i++) update_snake(i);
 
-    // Mantém o mapa sempre super recheado com muita comida
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
     for (int n = 0; n < 8 && count < NPEL - 20; n++, count++)
@@ -409,17 +420,15 @@ static void render(void)
         }
     }
 
-    // Desenhar comida brilhante estilo Slither.io (com núcleo branco reluzente)
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
         if (px >= -20 && px < (int)W + 20 && py >= -20 && py < (int)H + 20) {
-            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col); // Brilho exterior
-            circle(px, py, (int)(2 * sc), 0x00FFFFFF);                   // Miolo branco néon
+            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col);
+            circle(px, py, (int)(2 * sc), 0x00FFFFFF);
         }
     }
 
-    // Desenhar cobras gordas, encorpadas e com escamas/anéis unidos
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
@@ -431,7 +440,6 @@ static void render(void)
             circle(px, py, r, (j % 4 < 2) ? s->col : dark);
         }
         
-        // Cabeça gorda com olhos bem destacados estilo Slither
         int hx = (int)((s->x[0] - camx) * sc + hw), hy = (int)((s->y[0] - camy) * sc + hh);
         circle(hx, hy, r + 2, s->col);
         for (int e = -1; e <= 1; e += 2) {
