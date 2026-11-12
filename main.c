@@ -1,4 +1,5 @@
 // Cobra Arena - Estilo Slither.io Otimizado para PS3 (PSL1GHT)
+// Versao 2: mais cobras, cobras mais grossas, minimapa maior, comida em forma de bolo 🎂
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,15 +15,16 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
-#define WORLD  6000.0f
-#define MAXSEG 500
-#define NSN    12
-#define NPEL   1200
+#define WORLD  12000.0f   // mapa grande
+#define MAXSEG 900        // cobras podem ficar bem compridas
+#define NSN    35         // mais cobras no mapa (era 20)
+#define NPEL   4000       // mais bolos espalhados (era 2500)
+#define SEGD   5.0f       // distancia entre segmentos
 #define PI     3.14159265f
 
 typedef struct {
     float x[MAXSEG], y[MAXSEG];
-    int len, alive, respawn, boost, grow, score, tick;
+    int len, alive, respawn, boost, grow, score, tick, inv;
     float ang, tgt;
     u32 col;
 } Snake;
@@ -135,6 +137,16 @@ static void circle(int cx, int cy, int r, u32 c)
     }
 }
 
+static void dot(int cx, int cy, int sz, u32 c)
+{
+    fill_rect(cx - sz / 2, cy - sz / 2, sz, sz, c);
+}
+
+static float clampf(float v, float a, float b)
+{
+    return v < a ? a : (v > b ? b : v);
+}
+
 typedef struct { char c; const char *p; } Glyph;
 static const Glyph glyphs[] = {
     {'0', "###" "#.#" "#.#" "#.#" "###"}, {'1', ".#." "##." ".#." ".#." "###"},
@@ -174,17 +186,19 @@ static void draw_text(const char *s, int x, int y, int sc, u32 c)
 
 static Snake sn[NSN];
 static Pellet pel[NPEL];
-static int pelrot = 0, dead_t = 0, x_prev = 0;
+static int pelrot = 0, dead_t = 0, x_prev = 0, frame = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
+static float zoom = 1.0f;
 static float pad_ax = 0, pad_ay = 0, pad_mag = 0;
 static int pad_boost = 0, pad_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
+// Cobras mais grossas (base 24, era 18) e ainda engrossam conforme crescem
 static float radius_of(const Snake *s)
 {
-    int l = s->len > 300 ? 300 : s->len;
-    return 16.0f + l * 0.05f;
+    int l = s->len > 700 ? 700 : s->len;
+    return 24.0f + l * 0.045f;
 }
 
 static void add_pellet(float x, float y, int size)
@@ -203,30 +217,29 @@ static void add_pellet(float x, float y, int size)
 static void spawn_snake(int i)
 {
     Snake *s = &sn[i];
-    float x = 800.0f + frand() * (WORLD - 1600.0f);
-    float y = 800.0f + frand() * (WORLD - 1600.0f);
-    s->ang = frand() * 2 * PI;
+    float x = 1000.0f + frand() * (WORLD - 2000.0f);
+    float y = 1000.0f + frand() * (WORLD - 2000.0f);
+    s->ang = frand() * 2 * PI - PI;
     s->tgt = s->ang;
 
-    if (i == 0) {
-        s->len = 25;
-    } else {
-        s->len = 20 + (rand() % 70);
-    }
+    if (i == 0) s->len = 30;
+    else        s->len = 30 + (rand() % 120);
 
     for (int j = 0; j < s->len; j++) {
-        s->x[j] = x - cosf(s->ang) * 4.5f * j;
-        s->y[j] = y - sinf(s->ang) * 4.5f * j;
+        s->x[j] = x - cosf(s->ang) * SEGD * j;
+        s->y[j] = y - sinf(s->ang) * SEGD * j;
     }
     s->alive = 1; s->respawn = 0; s->boost = 0; s->grow = 0; s->tick = 0;
+    s->inv = 90;  // 1,5s de protecao ao nascer
     s->col = palette[(i + rand()) % 8];
 }
 
 static void kill_snake(int i)
 {
     Snake *s = &sn[i];
-    for (int j = 0; j < s->len; j += 2)
-        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
+    // Quando morre vira uma chuva de bolos
+    for (int j = 0; j < s->len; j += 3)
+        add_pellet(s->x[j] + (frand() - 0.5f) * 25, s->y[j] + (frand() - 0.5f) * 25, 2);
     s->alive = 0;
     s->respawn = 180;
     if (i == 0) dead_t = 0;
@@ -238,8 +251,8 @@ static void bot_think(int i)
     float hx = s->x[0], hy = s->y[0];
     s->tgt += (frand() - 0.5f) * 0.3f;
 
-    if (s->tick % 5 == 0) {
-        float best = 500.0f * 500.0f;
+    if ((s->tick + i) % 5 == 0) {
+        float best = 700.0f * 700.0f;
         int bi = -1;
         for (int k = 0; k < NPEL; k++) {
             if (!pel[k].active) continue;
@@ -249,7 +262,7 @@ static void bot_think(int i)
         if (bi >= 0) s->tgt = atan2f(pel[bi].y - hy, pel[bi].x - hx);
     }
 
-    if (hx < 400 || hx > WORLD - 400 || hy < 400 || hy > WORLD - 400)
+    if (hx < 600 || hx > WORLD - 600 || hy < 600 || hy > WORLD - 600)
         s->tgt = atan2f(WORLD / 2 - hy, WORLD / 2 - hx);
 }
 
@@ -261,13 +274,15 @@ static void update_snake(int i)
         return;
     }
     s->tick++;
+    if (s->inv > 0) s->inv--;
+
     if (i == 0) {
         // Só muda a direção se o analógico/direcional estiver realmente sendo usado
         if (pad_mag > 0.25f) s->tgt = atan2f(pad_ay, pad_ax);
         s->boost = pad_boost;
     } else {
         bot_think(i);
-        s->boost = (s->len > 40 && (s->tick / 120) % 4 == 0) ? 1 : 0;
+        s->boost = (s->len > 60 && (s->tick / 120) % 4 == 0) ? 1 : 0;
     }
 
     float d = s->tgt - s->ang;
@@ -276,14 +291,13 @@ static void update_snake(int i)
     if (d > 0.08f) d = 0.08f;
     if (d < -0.08f) d = -0.08f;
     s->ang += d;
-    // Mantém o ângulo sempre num intervalo seguro
     if (s->ang > PI) s->ang -= 2 * PI;
     if (s->ang < -PI) s->ang += 2 * PI;
 
-    float sp = 3.2f;
-    if (s->boost && s->len > 15) {
-        sp = 5.8f;
-        if (s->tick % 8 == 0) {
+    float sp = 3.6f;
+    if (s->boost && s->len > 20) {
+        sp = 6.4f;
+        if (s->tick % 6 == 0) {
             s->len--;
             add_pellet(s->x[s->len], s->y[s->len], 1);
         }
@@ -294,8 +308,8 @@ static void update_snake(int i)
     for (int j = 1; j < s->len; j++) {
         float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
         float dd = sqrtf(dx * dx + dy * dy);
-        if (dd > 4.5f) {
-            float f = (dd - 4.5f) / dd;
+        if (dd > SEGD) {
+            float f = (dd - SEGD) / dd;
             s->x[j] += dx * f;
             s->y[j] += dy * f;
         }
@@ -303,7 +317,8 @@ static void update_snake(int i)
 
     if (s->x[0] < 0 || s->x[0] > WORLD || s->y[0] < 0 || s->y[0] > WORLD) { kill_snake(i); return; }
 
-    float rs = radius_of(s), er = rs + 14;
+    // Comer bolos
+    float rs = radius_of(s), er = rs + 22;
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         float dx = pel[k].x - s->x[0], dy = pel[k].y - s->y[0];
@@ -313,19 +328,22 @@ static void update_snake(int i)
             s->score += pel[k].size * 10;
         }
     }
-    while (s->grow >= 2 && s->len < MAXSEG) {
+    // Cada ponto de crescimento = 1 segmento (cresce rapido)
+    while (s->grow >= 1 && s->len < MAXSEG) {
         s->x[s->len] = s->x[s->len - 1];
         s->y[s->len] = s->y[s->len - 1];
         s->len++;
-        s->grow -= 2;
+        s->grow -= 1;
     }
     if (s->len >= MAXSEG) s->grow = 0;
 
+    // Colisao com as outras cobras (pula de 2 em 2 segmentos pra ficar leve)
+    if (s->inv > 0) return;
     for (int o = 0; o < NSN; o++) {
         if (o == i || !sn[o].alive) continue;
         float lim = (rs + radius_of(&sn[o])) * 0.7f;
         lim *= lim;
-        for (int j = 0; j < sn[o].len; j++) {
+        for (int j = 0; j < sn[o].len; j += 2) {
             float dx = sn[o].x[j] - s->x[0], dy = sn[o].y[j] - s->y[0];
             if (dx * dx + dy * dy < lim) { kill_snake(i); return; }
         }
@@ -335,16 +353,15 @@ static void update_snake(int i)
 static void init_game(void)
 {
     memset(pel, 0, sizeof(pel));
-    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
+    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 6 == 0));
     for (int i = 0; i < NSN; i++) { sn[i].score = 0; spawn_snake(i); }
     dead_t = 0;
 }
 
 // ---- LEITURA DO CONTROLE (CORRIGIDA) ----
-// Problema original: ioPadGetData às vezes volta com len == 0 (sem dado novo),
-// e os campos vêm zerados. Isso era lido como "analógico todo pra cima/esquerda"
-// e a cobra perdia o controle do nada. Agora só aceitamos leituras válidas e
-// guardamos a última boa.
+// ioPadGetData às vezes volta com len == 0 (sem dado novo) e os campos vêm
+// zerados, o que era lido como "analógico todo pra cima/esquerda".
+// Agora só aceitamos leituras válidas e guardamos a última boa.
 static padData last_pad;
 static int have_pad = 0;
 
@@ -360,17 +377,16 @@ static void read_pad(void)
 
     memset(&d, 0, sizeof(d));
     ioPadGetData(0, &d);
-    if (d.len > 0) {            // leitura válida
+    if (d.len > 0) {
         last_pad = d;
         have_pad = 1;
     }
-    if (!have_pad) return;      // ainda sem nenhum dado válido
+    if (!have_pad) return;
     d = last_pad;
 
     float ax = ((int)d.ANA_L_H - 128) / 128.0f;
     float ay = ((int)d.ANA_L_V - 128) / 128.0f;
 
-    // Zona morta (analógico do PS3 nunca fica exatamente em 128)
     if (fabsf(ax) < 0.20f) ax = 0;
     if (fabsf(ay) < 0.20f) ay = 0;
 
@@ -392,12 +408,15 @@ static void update_game(void)
 
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
-    for (int n = 0; n < 8 && count < NPEL - 20; n++, count++)
-        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
+    for (int n = 0; n < 15 && count < NPEL - 20; n++, count++)
+        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 6 == 0));
 
     if (sn[0].alive) {
         camx = sn[0].x[0];
         camy = sn[0].y[0];
+        // Zoom suave: quanto maior a cobra, mais a camera se afasta
+        float target = 1.0f / (1.0f + (radius_of(&sn[0]) - 24.0f) * 0.018f);
+        zoom += (target - zoom) * 0.03f;
     } else {
         dead_t++;
         if (dead_t > 60 && pad_x && !x_prev) {
@@ -408,9 +427,76 @@ static void update_game(void)
     x_prev = pad_x;
 }
 
+// Bolo estilo emoji 🎂: duas camadas, cobertura escorrendo, vela e chama
+static void draw_cake(int x, int y, int u, u32 frost, u32 sponge)
+{
+    int sp = u < 2 ? 1 : u / 2;
+    fill_rect(x - 5 * u, y + 3 * u, 10 * u, u, 0x00E8E8E8);            // prato
+    fill_rect(x - 4 * u, y, 8 * u, 3 * u, sponge);                     // camada de baixo
+    fill_rect(x - 4 * u, y, 8 * u, u, frost);                          // cobertura de baixo
+    fill_rect(x - 4 * u, y + u, u, u, frost);                          // pingo esquerdo
+    fill_rect(x + 3 * u, y + u, u, u, frost);                          // pingo direito
+    fill_rect(x - 3 * u, y - 3 * u, 6 * u, 3 * u, sponge);             // camada de cima
+    fill_rect(x - 3 * u, y - 3 * u, 6 * u, u, frost);                  // cobertura de cima
+    fill_rect(x - 3 * u, y - 2 * u, u, u, frost);                      // pingo de cima
+    fill_rect(x + 2 * u, y - 2 * u, u, u, frost);                      // pingo de cima
+    fill_rect(x - 2 * u, y - u, sp, sp, 0x00FFFFFF);                   // confete
+    fill_rect(x + 1 * u, y + u, sp, sp, 0x00FF4D4D);                   // confete
+    fill_rect(x - sp / 2, y - 6 * u, sp, 3 * u, 0x00FFFFFF);           // vela
+    circle(x, y - 7 * u, (u / 2) + 1, 0x00FF9F1C);                     // chama
+    circle(x, y - 7 * u, (u / 4) + 1, 0x00FFF176);                     // miolo da chama
+}
+
+static void draw_minimap(float sc, float hw, float hh, float base)
+{
+    int msz = (int)(320 * base);   // minimapa maior (era 220)
+    if (msz < 160) msz = 160;
+    int mar = (int)(30 * base);
+    int mx = (int)W - msz - mar, my = mar;
+    float ms = (float)msz / WORLD;
+
+    fill_rect(mx - 4, my - 4, msz + 8, msz + 8, 0x00C8D4E0);  // borda
+    fill_rect(mx, my, msz, msz, 0x00080D14);                  // fundo
+
+    // Retangulo da area visivel na tela
+    int rx0 = mx + (int)(clampf(camx - hw / sc, 0, WORLD) * ms);
+    int rx1 = mx + (int)(clampf(camx + hw / sc, 0, WORLD) * ms);
+    int ry0 = my + (int)(clampf(camy - hh / sc, 0, WORLD) * ms);
+    int ry1 = my + (int)(clampf(camy + hh / sc, 0, WORLD) * ms);
+    u32 vc = 0x00406080;
+    fill_rect(rx0, ry0, rx1 - rx0, 1, vc);
+    fill_rect(rx0, ry1 - 1, rx1 - rx0, 1, vc);
+    fill_rect(rx0, ry0, 1, ry1 - ry0, vc);
+    fill_rect(rx1 - 1, ry0, 1, ry1 - ry0, vc);
+
+    int hs = (int)(5 * base + 0.5f);
+    if (hs < 4) hs = 4;
+
+    // Bots: corpo em pontinhos e cabeca maior pra facilitar ver
+    for (int i = NSN - 1; i >= 1; i--) {
+        Snake *s = &sn[i];
+        if (!s->alive) continue;
+        for (int j = 10; j < s->len; j += 10)
+            dot(mx + (int)(s->x[j] * ms), my + (int)(s->y[j] * ms), 3, s->col);
+        dot(mx + (int)(s->x[0] * ms), my + (int)(s->y[0] * ms), hs, s->col);
+    }
+
+    // Jogador por ultimo, em branco e maior
+    if (sn[0].alive) {
+        Snake *s = &sn[0];
+        for (int j = 10; j < s->len; j += 10)
+            dot(mx + (int)(s->x[j] * ms), my + (int)(s->y[j] * ms), 3, 0x00FFFFFF);
+        int px = mx + (int)(s->x[0] * ms), py = my + (int)(s->y[0] * ms);
+        dot(px, py, hs + 5, 0x00000000);
+        dot(px, py, hs + 3, 0x00FFFFFF);
+    }
+}
+
 static void render(void)
 {
-    float sc = (float)W / 1280.0f;
+    frame++;
+    float base = (float)W / 1280.0f;
+    float sc = base * zoom;
     float hw = W / 2.0f, hh = H / 2.0f;
     u32 n = W * H;
     for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
@@ -433,24 +519,30 @@ static void render(void)
         }
     }
 
-    // Comida
+    // Comida em formato de bolo (balancando de leve)
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
-        if (px >= -20 && px < (int)W + 20 && py >= -20 && py < (int)H + 20) {
-            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col);
-            circle(px, py, (int)(2 * sc), 0x00FFFFFF);
-        }
+        if (px < -60 || px >= (int)W + 60 || py < -60 || py >= (int)H + 60) continue;
+        int u = (int)((pel[k].size >= 2 ? 4.0f : 2.5f) * sc + 0.5f);
+        if (u < 2) u = 2;
+        int bob = (int)(sinf(frame * 0.08f + k * 0.7f) * u * 0.6f);
+        u32 sponge = pel[k].size >= 2 ? 0x00704020 : 0x00E2B070;
+        draw_cake(px, py + bob, u, pel[k].col, sponge);
     }
 
-    // Cobras (otimizado: pula segmentos fora da tela e desenha de 2 em 2)
+    // Cobras grandes (pula segmentos fora da tela; bots desenham de 3 em 3 pra ganhar FPS)
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
         int r = (int)(radius_of(s) * sc);
+        if (r < 3) r = 3;
         u32 dark = (s->col >> 1) & 0x007F7F7F;
+        // Piscando enquanto esta protegida
+        if (s->inv > 0 && (frame / 4) % 2 == 0) { dark = s->col; }
 
-        for (int j = (s->len - 1) & ~1; j >= 0; j -= 2) {
+        int step = (i == 0) ? 2 : 3;
+        for (int j = s->len - 1; j >= 0; j -= step) {
             int px = (int)((s->x[j] - camx) * sc + hw), py = (int)((s->y[j] - camy) * sc + hh);
             if (px < -r || px > (int)W + r || py < -r || py > (int)H + r) continue;
             circle(px, py, r, (j % 4 < 2) ? s->col : dark);
@@ -466,8 +558,11 @@ static void render(void)
         }
     }
 
+    // Minimapa no canto superior direito
+    draw_minimap(sc, hw, hh, base);
+
     char buf[32];
-    int ui = (int)(4 * sc + 0.5f);
+    int ui = (int)(4 * base + 0.5f);
     if (ui < 3) ui = 3;
     draw_text("SCORE", 24, 20, ui, 0x00FFFFFF);
     sprintf(buf, "%d", sn[0].score);
