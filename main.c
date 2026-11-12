@@ -1,4 +1,4 @@
-// Cobra Arena - Estável, Sem Tremuras, Super Recheado de Comida (PSL1GHT)
+// Cobra Arena - Corrigido Definitivamente para Comandos PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +17,7 @@
 #define WORLD  2500.0f
 #define MAXSEG 300
 #define NSN    18
-#define NPEL   1500 // Muito mais comida no mapa inteiro
+#define NPEL   1500
 #define PI     3.14159265f
 
 typedef struct {
@@ -142,7 +142,7 @@ static const Glyph glyphs[] = {
     {'4', "#.#" "#.#" "###" "..#" "..#"}, {'5', "###" "#.." "###" "..#" "###"},
     {'6', "###" "#.." "###" "#.#" "###"}, {'7', "###" "..#" "..#" "..#" "..#"},
     {'8', "###" "#.#" "###" "#.#" "###"}, {'9', "###" "#.#" "###" "..#" "###"},
-    {'A', ".#." "#.#" "###" "#.#" "#.#"}, {'B', "##." "#.#" "##." "#.#" "##."},
+    {'A', ".#." "#.#" "###" "#.#" "#.#"}, {'B', "##." "#.#" "##." "#.#" "#.#"},
     {'C', "###" "#.." "#.." "#.." "###"}, {'E', "###" "#.." "###" "#.." "###"},
     {'G', "###" "#.." "#.#" "#.#" "###"}, {'M', "#.#" "###" "###" "#.#" "#.#"},
     {'O', "###" "#.#" "#.#" "#.#" "###"}, {'P', "###" "#.#" "###" "#.." "#.."},
@@ -259,7 +259,8 @@ static void update_snake(int i)
     }
     s->tick++;
     if (i == 0) {
-        if (pad_mag > 0.25f) {
+        // So atualiza o angulo alvo se o jogador estiver a mexer mesmo o comando
+        if (pad_mag > 0.1f) {
             s->tgt = atan2f(pad_ay, pad_ax);
         }
         s->boost = pad_boost;
@@ -286,7 +287,6 @@ static void update_snake(int i)
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
     
-    // Suavizacao estavel para eliminar qualquer tremor na cabeca/corpo
     for (int j = 1; j < s->len; j++) {
         float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
         float dd = sqrtf(dx * dx + dy * dy);
@@ -340,33 +340,45 @@ static void read_pad(void)
 {
     padInfo info;
     padData d;
+    
+    // Reseta completamente as variaveis a cada frame para evitar que fiquem presas!
+    pad_ax = 0.0f;
+    pad_ay = 0.0f;
+    pad_mag = 0.0f;
+    pad_boost = 0;
+    pad_x = 0;
+
     ioPadGetInfo(&info);
     if (info.status[0] || info.status[1]) {
         int p = info.status[0] ? 0 : 1;
         ioPadGetData(p, &d);
         
-        float ax = 0, ay = 0;
+        float ax = 0.0f;
+        float ay = 0.0f;
+        
+        // D-Pad prioritario
         if (d.BTN_LEFT)  ax = -1.0f;
         if (d.BTN_RIGHT) ax =  1.0f;
         if (d.BTN_UP)    ay = -1.0f;
         if (d.BTN_DOWN)  ay =  1.0f;
         
-        if (ax == 0 && ay == 0) {
-            float al_h = ((int)d.ANA_L_H - 128) / 128.0f;
-            float al_v = ((int)d.ANA_L_V - 128) / 128.0f;
-            if (al_h > 0.35f || al_h < -0.35f || al_v > 0.35f || al_v < -0.35f) {
-                ax = al_h;
-                ay = al_v;
+        // Se o D-pad nao esta a ser usado, verifica o analogico com zona morta rigorosa (evita drift de comando paraguai)
+        if (ax == 0.0f && ay == 0.0f) {
+            int h = (int)d.ANA_L_H - 128;
+            int v = (int)d.ANA_L_V - 128;
+            
+            // Zona morta de 50 (em 128) para ignorar qualquer folga do analogico
+            if (h > 50 || h < -50 || v > 50 || v < -50) {
+                ax = (float)h / 128.0f;
+                ay = (float)v / 128.0f;
             }
         }
         
-        if (ax != 0 || ay != 0) {
+        if (ax != 0.0f || ay != 0.0f) {
             pad_ax = ax; 
             pad_ay = ay;
             pad_mag = sqrtf(ax * ax + ay * ay);
             if (pad_mag > 1.0f) pad_mag = 1.0f;
-        } else {
-            pad_mag = 0.0f; // Zona morta perfeita: soltou o analogico, segue reto sem tremer!
         }
         
         pad_boost = d.BTN_CROSS;
