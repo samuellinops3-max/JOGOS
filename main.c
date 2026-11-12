@@ -1,4 +1,4 @@
-// Cobra Arena - Otimizado e Ajustado para PS3 (PSL1GHT)
+// Cobra Arena - Estável, Sem Tremuras, Super Recheado de Comida (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,10 +14,10 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
-#define WORLD  2500.0f  // Mapa reduzido para muita acao rapida
+#define WORLD  2500.0f
 #define MAXSEG 300
-#define NSN    18       // Mais cobras bots no mapa
-#define NPEL   800      // Comida super recheada
+#define NSN    18
+#define NPEL   1500 // Muito mais comida no mapa inteiro
 #define PI     3.14159265f
 
 typedef struct {
@@ -221,7 +221,6 @@ static void spawn_snake(int i)
 static void kill_snake(int i)
 {
     Snake *s = &sn[i];
-    // Deixa uma explosão rica de comida em volta de todo o corpo da cobra derrotada
     for (int j = 0; j < s->len; j += 1) {
         add_pellet(s->x[j] + (frand() - 0.5f) * 25, s->y[j] + (frand() - 0.5f) * 25, 2);
     }
@@ -234,10 +233,10 @@ static void bot_think(int i)
 {
     Snake *s = &sn[i];
     float hx = s->x[0], hy = s->y[0];
-    s->tgt += (frand() - 0.5f) * 0.4f;
+    s->tgt += (frand() - 0.5f) * 0.3f;
 
-    if (s->tick % 4 == 0) {
-        float best = 300.0f * 300.0f;
+    if (s->tick % 6 == 0) {
+        float best = 350.0f * 350.0f;
         int bi = -1;
         for (int k = 0; k < NPEL; k++) {
             if (!pel[k].active) continue;
@@ -260,7 +259,9 @@ static void update_snake(int i)
     }
     s->tick++;
     if (i == 0) {
-        if (pad_mag > 0.15f) s->tgt = atan2f(pad_ay, pad_ax);
+        if (pad_mag > 0.25f) {
+            s->tgt = atan2f(pad_ay, pad_ax);
+        }
         s->boost = pad_boost;
     } else {
         bot_think(i);
@@ -270,14 +271,14 @@ static void update_snake(int i)
     float d = s->tgt - s->ang;
     while (d > PI) d -= 2 * PI;
     while (d < -PI) d += 2 * PI;
-    if (d > 0.1f) d = 0.1f;
-    if (d < -0.1f) d = -0.1f;
+    if (d > 0.08f) d = 0.08f;
+    if (d < -0.08f) d = -0.08f;
     s->ang += d;
 
-    float sp = 3.5f;
+    float sp = 3.2f;
     if (s->boost && s->len > 15) {
-        sp = 6.0f;
-        if (s->tick % 6 == 0) {
+        sp = 5.5f;
+        if (s->tick % 8 == 0) {
             s->len--;
             add_pellet(s->x[s->len], s->y[s->len], 1);
         }
@@ -285,13 +286,14 @@ static void update_snake(int i)
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
     
+    // Suavizacao estavel para eliminar qualquer tremor na cabeca/corpo
     for (int j = 1; j < s->len; j++) {
         float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
         float dd = sqrtf(dx * dx + dy * dy);
         if (dd > 4.5f) {
             float f = (dd - 4.5f) / dd;
-            s->x[j] += dx * f;
-            s->y[j] += dy * f;
+            s->x[j] += dx * f * 0.85f;
+            s->y[j] += dy * f * 0.85f;
         }
     }
 
@@ -338,8 +340,6 @@ static void read_pad(void)
 {
     padInfo info;
     padData d;
-    pad_ax = pad_ay = pad_mag = 0;
-    pad_boost = pad_x = 0;
     ioPadGetInfo(&info);
     if (info.status[0] || info.status[1]) {
         int p = info.status[0] ? 0 : 1;
@@ -354,16 +354,20 @@ static void read_pad(void)
         if (ax == 0 && ay == 0) {
             float al_h = ((int)d.ANA_L_H - 128) / 128.0f;
             float al_v = ((int)d.ANA_L_V - 128) / 128.0f;
-            if (al_h > 0.25f || al_h < -0.25f || al_v > 0.25f || al_v < -0.25f) {
+            if (al_h > 0.35f || al_h < -0.35f || al_v > 0.35f || al_v < -0.35f) {
                 ax = al_h;
                 ay = al_v;
             }
         }
         
-        pad_ax = ax; 
-        pad_ay = ay;
-        pad_mag = sqrtf(ax * ax + ay * ay);
-        if (pad_mag > 1.0f) pad_mag = 1.0f;
+        if (ax != 0 || ay != 0) {
+            pad_ax = ax; 
+            pad_ay = ay;
+            pad_mag = sqrtf(ax * ax + ay * ay);
+            if (pad_mag > 1.0f) pad_mag = 1.0f;
+        } else {
+            pad_mag = 0.0f; // Zona morta perfeita: soltou o analogico, segue reto sem tremer!
+        }
         
         pad_boost = d.BTN_CROSS;
         pad_x = d.BTN_CROSS;
@@ -376,7 +380,7 @@ static void update_game(void)
 
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
-    for (int n = 0; n < 12 && count < NPEL - 30; n++, count++)
+    for (int n = 0; n < 25 && count < NPEL - 50; n++, count++)
         add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
 
     if (sn[0].alive) {
@@ -445,6 +449,19 @@ static void render(void)
             circle(ex, ey, r * 40 / 100 + 1, 0x00FFFFFF); 
             circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 20 / 100 + 1, 0x00000000); 
         }
+    }
+
+    // Mini-mapa / Radar no canto superior direito
+    int rw = 150, rh = 150;
+    int rx = W - rw - 30, ry = 30;
+    fill_rect(rx - 2, ry - 2, rw + 4, rh + 4, 0x00FFFFFF);
+    fill_rect(rx, ry, rw, rh, 0x00111927);
+
+    for (int i = 0; i < NSN; i++) {
+        if (!sn[i].alive) continue;
+        int mx = rx + (int)((sn[i].x[0] / WORLD) * rw);
+        int my = ry + (int)((sn[i].y[0] / WORLD) * rh);
+        fill_rect(mx - 1, my - 1, 3, 3, (i == 0) ? 0x0000FF00 : 0x00FF4D4D);
     }
 
     char buf[32];
