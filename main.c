@@ -1,4 +1,4 @@
-// Teste Limpo de Controlo da Cobra - PS3 (PSL1GHT)
+// Teste Blindado de Controlo - PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,7 +167,7 @@ static void init_game(void)
     float y = WORLD / 2;
     player.ang = 0.0f;
     player.tgt = 0.0f;
-    player.col = 0x0055D6FF; // Ciano vivo
+    player.col = 0x0055D6FF;
 
     for (int j = 0; j < player.len; j++) {
         player.x[j] = x - (float)j * 5.0f;
@@ -179,20 +179,21 @@ static void read_pad(void)
 {
     padInfo info;
     padData d;
+    memset(&d, 0, sizeof(d)); // Limpa a estrutura de dados do comando a cada frame para evitar lixo de memória
+    
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
 
-        // 1. Leitura direta e sem filtros complexos do Analógico L3
+        // Leitura contínua do Analógico L3
         int ax = (int)d.ANA_L_H - 128;
         int ay = (int)d.ANA_L_V - 128;
 
-        // Zona morta simples de 15 para evitar drift
-        if (ax < -15 || ax > 15 || ay < -15 || ay > 15) {
+        if (ax < -12 || ax > 12 || ay < -12 || ay > 12) {
             player_target_ang = atan2f((float)ay, (float)ax);
         }
 
-        // 2. Setinhas com prioridade total se premidas
+        // Setinhas com prioridade
         if (d.BTN_LEFT)  player_target_ang = PI;
         if (d.BTN_RIGHT) player_target_ang = 0.0f;
         if (d.BTN_UP)    player_target_ang = -PI / 2.0f;
@@ -204,17 +205,14 @@ static void update_game(void)
 {
     player.tgt = player_target_ang;
 
-    // Suavização do ângulo da cabeça
     float diff = player.tgt - player.ang;
     while (diff > PI) diff -= 2 * PI;
     while (diff < -PI) diff += 2 * PI;
-    player.ang += diff * 0.15f;
+    player.ang += diff * 0.2f;
 
-    // Movimento da cabeça
     player.x[0] += cosf(player.ang) * 4.0f;
     player.y[0] += sinf(player.ang) * 4.0f;
 
-    // Seguir o corpo
     for (int j = 1; j < player.len; j++) {
         float dx = player.x[j - 1] - player.x[j];
         float dy = player.y[j - 1] - player.y[j];
@@ -226,15 +224,13 @@ static void update_game(void)
         }
     }
 
-    // Limites do mapa
     if (player.x[0] < 50) player.x[0] = 50;
     if (player.x[0] > WORLD - 50) player.x[0] = WORLD - 50;
     if (player.y[0] < 50) player.y[0] = 50;
-    if (player.y[0] > WORLD - 50) player.y[0] = WORLD - 50;
+    if (player.y[0] > WORLD - 50) player.y[0] > WORLD - 50 ? WORLD - 50 : (player.y[0] < 50 ? 50 : player.y[0]);
 
-    // Câmara a seguir a cobra
-    camx += (player.x[0] - camx) * 0.1f;
-    camy += (player.y[0] - camy) * 0.1f;
+    camx += (player.x[0] - camx) * 0.15f;
+    camy += (player.y[0] - camy) * 0.15f;
 }
 
 static void render(void)
@@ -243,18 +239,15 @@ static void render(void)
     float hw = W / 2.0f, hh = H / 2.0f;
     u32 n = W * H;
 
-    // Fundo escuro limpo
     for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
 
-    // Desenhar a cobra
     for (int j = player.len - 1; j >= 0; j--) {
         int px = (int)((player.x[j] - camx) * sc + hw);
         int py = (int)((player.y[j] - camy) * sc + hh);
         circle(px, py, (int)(12 * sc), (j == 0) ? 0x00FFFFFF : player.col);
     }
 
-    // Texto no ecrã para sabermos que está a correr
-    draw_text("TESTE DE CONTROLO - ANALOGICO E SETINHAS", 30, 20, 2, 0x0055D6FF);
+    draw_text("TESTE FIX CONTROLO ANALOGICO", 30, 20, 2, 0x0055D6FF);
 }
 
 int main(int argc, char **argv)
