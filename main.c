@@ -1,4 +1,4 @@
-// Penalti Combate Arcade - PS3 (PSL1GHT)
+// Teste Limpo de Controlo da Cobra - PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +14,17 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
+#define WORLD  4000.0f
+#define MAXSEG 100
+#define PI     3.14159265f
+
+typedef struct {
+    float x[MAXSEG], y[MAXSEG];
+    int len;
+    float ang, tgt;
+    u32 col;
+} Snake;
+
 static gcmContextData *ctx;
 static u32 W, H;
 static u32 *fb[2];
@@ -22,18 +33,9 @@ static u32 *back;
 static int cur = 0, first_flip = 1;
 static volatile int running = 1;
 
-// Estado do Jogo de Penáltis
-typedef enum { STATE_CHOOSE_DIR, STATE_KICKING, STATE_DEFENDING, STATE_RESULT } GameState;
-static GameState state = STATE_CHOOSE_DIR;
-
-static int player_score = 0;
-static int bot_score = 0;
-static int chosen_dir = 1; // 0: Esq, 1: Meio, 2: Dir
-static int bot_dir = 1;
-static int kick_timer = 0;
-static int result_timer = 0;
-static char result_msg[32] = "GOLO!";
-static u32 team_color = 0x00FF3333; // Cor da camisa inicial (Vermelho/Azul)
+static Snake player;
+static float player_target_ang = 0.0f;
+static float camx = WORLD / 2, camy = WORLD / 2;
 
 static void sysutil_cb(u64 status, u64 param, void *usrdata)
 {
@@ -108,6 +110,22 @@ static void fill_rect(int x, int y, int w, int h, u32 c)
     }
 }
 
+static void circle(int cx, int cy, int r, u32 c)
+{
+    if (r < 1) r = 1;
+    if (cx + r < 0 || cx - r >= (int)W || cy + r < 0 || cy - r >= (int)H) return;
+    for (int dy = -r; dy <= r; dy++) {
+        int y = cy + dy;
+        if (y < 0 || y >= (int)H) continue;
+        int hw = (int)sqrtf((float)(r * r - dy * dy));
+        int x0 = cx - hw, x1 = cx + hw;
+        if (x0 < 0) x0 = 0;
+        if (x1 >= (int)W) x1 = W - 1;
+        u32 *p = back + y * W;
+        for (int x = x0; x <= x1; x++) p[x] = c;
+    }
+}
+
 typedef struct { char c; const char *p; } Glyph;
 static const Glyph glyphs[] = {
     {'0', "###" "#.#" "#.#" "#.#" "###"}, {'1', ".#." "##." ".#." ".#." "###"},
@@ -116,13 +134,11 @@ static const Glyph glyphs[] = {
     {'6', "###" "#.." "###" "#.#" "###"}, {'7', "###" "..#" "..#" "..#" "..#"},
     {'8', "###" "#.#" "###" "#.#" "###"}, {'9', "###" "#.#" "###" "..#" "###"},
     {'A', ".#." "#.#" "###" "#.#" "#.#"}, {'C', "###" "#.." "#.." "#.." "###"},
-    {'D', "##." "#.#" "#.#" "#.#" "##."}, {'E', "###" "#.." "###" "#.." "###"},
-    {'G', "###" "#.." "#.#" "#.#" "###"}, {'I', "###" ".#." ".#." ".#." "###"},
-    {'K', "#.#" "#.#" "##." "#.#" "#.#"}, {'L', "#.." "#.." "#.." "#.." "###"},
-    {'O', "###" "#.#" "#.#" "#.#" "###"}, {'P', "###" "#.#" "###" "#.." "#.."},
-    {'R', "##." "#.#" "##." "#.#" "#.#"}, {'S', "###" "#.." "###" "..#" "###"},
-    {'T', "###" ".#." ".#." ".#." ".#."}, {'U', "#.#" "#.#" "#.#" "#.#" "###"},
-    {'V', "#.#" "#.#" "#.#" "#.#" ".#."}, {'X', "#.#" "#.#" ".#." "#.#" "#.#"},
+    {'E', "###" "#.." "###" "#.." "###"}, {'I', "###" ".#." ".#." ".#." "###"},
+    {'L', "#.." "#.." "#.." "#.." "###"}, {'O', "###" "#.#" "#.#" "#.#" "###"},
+    {'P', "###" "#.#" "###" "#.." "#.."}, {'R', "##." "#.#" "##." "#.#" "#.#"},
+    {'S', "###" "#.." "###" "..#" "###"}, {'T', "###" ".#." ".#." ".#." ".#."},
+    {'U', "#.#" "#.#" "#.#" "#.#" "###"}, {'V', "#.#" "#.#" "#.#" "#.#" ".#."},
 };
 
 static const char *find_glyph(char c)
@@ -144,6 +160,21 @@ static void draw_text(const char *s, int x, int y, int sc, u32 c)
     }
 }
 
+static void init_game(void)
+{
+    player.len = 25;
+    float x = WORLD / 2;
+    float y = WORLD / 2;
+    player.ang = 0.0f;
+    player.tgt = 0.0f;
+    player.col = 0x0055D6FF; // Ciano vivo
+
+    for (int j = 0; j < player.len; j++) {
+        player.x[j] = x - (float)j * 5.0f;
+        player.y[j] = y;
+    }
+}
+
 static void read_pad(void)
 {
     padInfo info;
@@ -152,131 +183,78 @@ static void read_pad(void)
     if (info.status[0]) {
         ioPadGetData(0, &d);
 
-        if (state == STATE_CHOOSE_DIR) {
-            if (d.BTN_LEFT)  { chosen_dir = 0; state = STATE_KICKING; kick_timer = 0; }
-            if (d.BTN_DOWN)  { chosen_dir = 1; state = STATE_KICKING; kick_timer = 0; }
-            if (d.BTN_RIGHT) { chosen_dir = 2; state = STATE_KICKING; kick_timer = 0; }
-            
-            // Mudar cor da camisa com o botão L1 ou R1
-            if (d.BTN_L1) team_color = 0x000066FF; // Azul
-            if (d.BTN_R1) team_color = 0x00FF3333; // Vermelho
-        } 
-        else if (state == STATE_DEFENDING) {
-            // A defender o penálti do bot
-            if (d.BTN_LEFT)  { chosen_dir = 0; state = STATE_RESULT; result_timer = 0; }
-            if (d.BTN_DOWN)  { chosen_dir = 1; state = STATE_RESULT; result_timer = 0; }
-            if (d.BTN_RIGHT) { chosen_dir = 2; state = STATE_RESULT; result_timer = 0; }
+        // 1. Leitura direta e sem filtros complexos do Analógico L3
+        int ax = (int)d.ANA_L_H - 128;
+        int ay = (int)d.ANA_L_V - 128;
+
+        // Zona morta simples de 15 para evitar drift
+        if (ax < -15 || ax > 15 || ay < -15 || ay > 15) {
+            player_target_ang = atan2f((float)ay, (float)ax);
         }
+
+        // 2. Setinhas com prioridade total se premidas
+        if (d.BTN_LEFT)  player_target_ang = PI;
+        if (d.BTN_RIGHT) player_target_ang = 0.0f;
+        if (d.BTN_UP)    player_target_ang = -PI / 2.0f;
+        if (d.BTN_DOWN)  player_target_ang = PI / 2.0f;
     }
 }
 
 static void update_game(void)
 {
-    if (state == STATE_KICKING) {
-        kick_timer++;
-        if (kick_timer > 40) {
-            // Bot escolhe um canto aleatório para defender (0: esq, 1: centro, 2: dir)
-            bot_dir = rand() % 3;
-            if (chosen_dir == bot_dir) {
-                strcpy(result_msg, "DEFENDEU O GUARDA-REDES!");
-            } else {
-                strcpy(result_msg, "GOLASSO!");
-                player_score++;
-            }
-            state = STATE_RESULT;
-            result_timer = 0;
-        }
-    } 
-    else if (state == STATE_RESULT) {
-        result_timer++;
-        if (result_timer > 90) {
-            // Passa para a vez do bot chutar (defender)
-            if (player_score >= 5 || bot_score >= 5) {
-                // Reset de jogo se alguém ganhar
-                player_score = 0;
-                bot_score = 0;
-            }
-            state = STATE_DEFENDING;
-        }
-    }
-    else if (state == STATE_DEFENDING) {
-        // Simulação se o bot marcar ou não baseado na escolha do jogador
-        bot_dir = rand() % 3;
-        // Se o jogador acertar o lado na defesa, defende!
-        // (Tratado no read_pad, mas atualizamos o resultado a seguir)
-    }
-}
+    player.tgt = player_target_ang;
 
-// Função específica para processar a defesa quando o user escolhe o canto
-static void evaluate_defense(void)
-{
-    // Esta parte corre logo após o user escolher o canto para defender
-    if (chosen_dir == bot_dir) {
-        strcpy(result_msg, "DEFENDESTE O PENALTI!");
-    } else {
-        strcpy(result_msg, "O BOT MARCOU GOLO!");
-        bot_score++;
+    // Suavização do ângulo da cabeça
+    float diff = player.tgt - player.ang;
+    while (diff > PI) diff -= 2 * PI;
+    while (diff < -PI) diff += 2 * PI;
+    player.ang += diff * 0.15f;
+
+    // Movimento da cabeça
+    player.x[0] += cosf(player.ang) * 4.0f;
+    player.y[0] += sinf(player.ang) * 4.0f;
+
+    // Seguir o corpo
+    for (int j = 1; j < player.len; j++) {
+        float dx = player.x[j - 1] - player.x[j];
+        float dy = player.y[j - 1] - player.y[j];
+        float dist = sqrtf(dx * dx + dy * dy);
+        if (dist > 5.0f) {
+            float f = (dist - 5.0f) / dist;
+            player.x[j] += dx * f * 0.8f;
+            player.y[j] += dy * f * 0.8f;
+        }
     }
+
+    // Limites do mapa
+    if (player.x[0] < 50) player.x[0] = 50;
+    if (player.x[0] > WORLD - 50) player.x[0] = WORLD - 50;
+    if (player.y[0] < 50) player.y[0] = 50;
+    if (player.y[0] > WORLD - 50) player.y[0] = WORLD - 50;
+
+    // Câmara a seguir a cobra
+    camx += (player.x[0] - camx) * 0.1f;
+    camy += (player.y[0] - camy) * 0.1f;
 }
 
 static void render(void)
 {
     float sc = (float)W / 1280.0f;
+    float hw = W / 2.0f, hh = H / 2.0f;
     u32 n = W * H;
 
-    // Relvado do Estádio (Verde)
-    for (u32 i = 0; i < n; i++) back[i] = 0x00228B22;
+    // Fundo escuro limpo
+    for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
 
-    // Área de penálti e baliza ao fundo
-    int gw = 600, gh = 220;
-    int gx = (W - gw) / 2, gy = 80;
-    
-    // Fundo da baliza (rede)
-    fill_rect(gx, gy, gw, gh, 0x00113311);
-    // Traves da Baliza (Branco)
-    fill_rect(gx - 10, gy, 10, gh, 0x00FFFFFF); // Trave esquerda
-    fill_rect(gx + gw, gy, 10, gh, 0x00FFFFFF); // Trave direita
-    fill_rect(gx - 10, gy - 10, gw + 20, 10, 0x00FFFFFF); // Travessão
-
-    // Guarda-redes (Guarda-redes amarelo no centro ou a saltar)
-    int gk_x = gx + gw / 2 - 20;
-    int gk_y = gy + 80;
-    if (state == STATE_KICKING) {
-        if (bot_dir == 0) gk_x = gx + 50;
-        if (bot_dir == 2) gk_x = gx + gw - 90;
+    // Desenhar a cobra
+    for (int j = player.len - 1; j >= 0; j--) {
+        int px = (int)((player.x[j] - camx) * sc + hw);
+        int py = (int)((player.y[j] - camy) * sc + hh);
+        circle(px, py, (int)(12 * sc), (j == 0) ? 0x00FFFFFF : player.col);
     }
-    fill_rect(gk_x, gk_y, 40, 80, 0x00FFD700); // Bloco do GR
 
-    // Bola de Futebol
-    int ball_x = W / 2 - 10;
-    int ball_y = H - 150;
-    if (state == STATE_KICKING) {
-        int target_x = gx + 100;
-        if (chosen_dir == 1) target_x = gx + gw / 2;
-        if (chosen_dir == 2) target_x = gx + gw - 120;
-        ball_x = ball_x + (int)((target_x - ball_x) * ((float)kick_timer / 40.0f));
-        ball_y = ball_y - (int)(250.0f * ((float)kick_timer / 40.0f));
-    }
-    fill_rect(ball_x, ball_y, 20, 20, 0x00FFFFFF); // Bola branca
-
-    // Placar / HUD
-    char buf[64];
-    sprintf(buf, "JOGADOR %d  X  %d BOT", player_score, bot_score);
-    draw_text(buf, W / 2 - 180, 20, 3, 0x00FFFFFF);
-
-    // Instruções no rodapé
-    if (state == STATE_CHOOSE_DIR) {
-        draw_text("ESCOLHE O CANTO PARA CHUTAR:", W / 2 - 240, H - 90, 2, 0x00FFFF00);
-        draw_text("< ESQUERDA    |    BAIXO: MEIO    |    DIREITA >", W / 2 - 320, H - 55, 2, 0x00FFFFFF);
-        draw_text("L1 / R1: MUDAR COR DA CAMISA", W / 2 - 220, H - 25, 2, 0x0000E5C0);
-    } else if (state == STATE_KICKING) {
-        draw_text("A BATER O PENALTI...", W / 2 - 140, H - 70, 3, 0x00FFD23F);
-    } else if (state == STATE_RESULT) {
-        draw_text(result_msg, W / 2 - (strlen(result_msg) * 12), H - 70, 3, 0x00FF4D4D);
-    } else if (state == STATE_DEFENDING) {
-        draw_text("SUA VEZ DE DEFENDER! ESCOLHE O CANTO:", W / 2 - 300, H - 90, 2, 0x00FFFF00);
-        draw_text("< ESQUERDA    |    BAIXO: CENTRO    |    DIREITA >", W / 2 - 330, H - 55, 2, 0x00FFFFFF);
-    }
+    // Texto no ecrã para sabermos que está a correr
+    draw_text("TESTE DE CONTROLO - ANALOGICO E SETINHAS", 30, 20, 2, 0x0055D6FF);
 }
 
 int main(int argc, char **argv)
@@ -285,7 +263,7 @@ int main(int argc, char **argv)
     init_screen();
     ioPadInit(7);
     sysUtilRegisterCallback(0, sysutil_cb, NULL);
-    srand(20261111);
+    init_game();
 
     while (running) {
         sysUtilCheckCallback();
