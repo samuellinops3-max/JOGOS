@@ -1,4 +1,4 @@
-// Cobra Arena - estilo slither.io para PS3 (PSL1GHT)
+// Cobra Arena - Estilo Slither.io Otimizado para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,11 +14,10 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
-#define WORLD  6000.0f  // Mapa maior e mais espaçoso
-#define MAXSEG 500      // Capacidade máxima de segmentos para cobras maiores
-#define NSN    12       // Mais cobras na arena
-#define NPEL   700      // Mais pellets espalhados
-#define SP     6.5f     // Velocidade base
+#define WORLD  6000.0f
+#define MAXSEG 500
+#define NSN    12
+#define NPEL   1200     // Muito mais comida espalhada pelo mapa
 #define PI     3.14159265f
 
 typedef struct {
@@ -39,7 +38,6 @@ static const u32 palette[8] = {
     0x00C77DFF, 0x00FF8FAB, 0x0000E5C0, 0x00FF9F43
 };
 
-/* ---------- video ---------- */
 static gcmContextData *ctx;
 static u32 W, H;
 static u32 *fb[2];
@@ -109,7 +107,6 @@ static void present(void)
     first_flip = 0;
 }
 
-/* ---------- desenho ---------- */
 static void fill_rect(int x, int y, int w, int h, u32 c)
 {
     int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
@@ -138,7 +135,6 @@ static void circle(int cx, int cy, int r, u32 c)
     }
 }
 
-/* fonte 3x5 minima */
 typedef struct { char c; const char *p; } Glyph;
 static const Glyph glyphs[] = {
     {'0', "###" "#.#" "#.#" "#.#" "###"}, {'1', ".#." "##." ".#." ".#." "###"},
@@ -176,7 +172,6 @@ static void draw_text(const char *s, int x, int y, int sc, u32 c)
     }
 }
 
-/* ---------- jogo ---------- */
 static Snake sn[NSN];
 static Pellet pel[NPEL];
 static int pelrot = 0, dead_t = 0, x_prev = 0;
@@ -186,10 +181,11 @@ static int pad_boost = 0, pad_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
+// Raio maior para as cobras ficarem bem gordas e encorpadas como no Slither.io
 static float radius_of(const Snake *s)
 {
     int l = s->len > 300 ? 300 : s->len;
-    return 11.0f + l * 0.04f;
+    return 16.0f + l * 0.05f; 
 }
 
 static void add_pellet(float x, float y, int size)
@@ -220,8 +216,8 @@ static void spawn_snake(int i)
     }
 
     for (int j = 0; j < s->len; j++) {
-        s->x[j] = x - cosf(s->ang) * 5.0f * j;
-        s->y[j] = y - sinf(s->ang) * 5.0f * j;
+        s->x[j] = x - cosf(s->ang) * 4.5f * j;
+        s->y[j] = y - sinf(s->ang) * 4.5f * j;
     }
     s->alive = 1; s->respawn = 0; s->boost = 0; s->grow = 0; s->tick = 0;
     s->col = palette[(i + rand()) % 8];
@@ -295,8 +291,8 @@ static void update_snake(int i)
     for (int j = 1; j < s->len; j++) {
         float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
         float dd = sqrtf(dx * dx + dy * dy);
-        if (dd > 5.0f) {
-            float f = (dd - 5.0f) / dd;
+        if (dd > 4.5f) {
+            float f = (dd - 4.5f) / dd;
             s->x[j] += dx * f;
             s->y[j] += dy * f;
         }
@@ -369,9 +365,10 @@ static void update_game(void)
 {
     for (int i = 0; i < NSN; i++) update_snake(i);
 
+    // Mantém o mapa sempre super recheado com muita comida
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
-    for (int n = 0; n < 3 && count < NPEL - 50; n++, count++)
+    for (int n = 0; n < 8 && count < NPEL - 20; n++, count++)
         add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
 
     if (sn[0].alive) {
@@ -412,12 +409,17 @@ static void render(void)
         }
     }
 
+    // Desenhar comida brilhante estilo Slither.io (com núcleo branco reluzente)
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
-        circle(px, py, (int)((3 + pel[k].size * 2) * sc), pel[k].col);
+        if (px >= -20 && px < (int)W + 20 && py >= -20 && py < (int)H + 20) {
+            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col); // Brilho exterior
+            circle(px, py, (int)(2 * sc), 0x00FFFFFF);                   // Miolo branco néon
+        }
     }
 
+    // Desenhar cobras gordas, encorpadas e com escamas/anéis unidos
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
@@ -429,13 +431,14 @@ static void render(void)
             circle(px, py, r, (j % 4 < 2) ? s->col : dark);
         }
         
+        // Cabeça gorda com olhos bem destacados estilo Slither
         int hx = (int)((s->x[0] - camx) * sc + hw), hy = (int)((s->y[0] - camy) * sc + hh);
-        circle(hx, hy, r + 1, s->col);
+        circle(hx, hy, r + 2, s->col);
         for (int e = -1; e <= 1; e += 2) {
             int ex = hx + (int)(cosf(s->ang + e * 0.7f) * r * 0.65f);
             int ey = hy + (int)(sinf(s->ang + e * 0.7f) * r * 0.65f);
-            circle(ex, ey, r * 38 / 100 + 1, 0x00FFFFFF);
-            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 18 / 100 + 1, 0x00000000);
+            circle(ex, ey, r * 40 / 100 + 1, 0x00FFFFFF); 
+            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 20 / 100 + 1, 0x00000000); 
         }
     }
 
