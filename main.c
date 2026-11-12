@@ -1,4 +1,4 @@
-// Cobra Arena - Controlo por Setinhas (D-Pad) Definitivo para PS3 (PSL1GHT)
+// Cobra Arena - Slither.io Final Ultra Estável para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,7 +177,8 @@ static Pellet pel[NPEL];
 static int pelrot = 0, dead_t = 0, x_prev = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
 
-static float player_target_ang = 0.0f;
+// Controlo blindado e limpo
+static float player_angle = 0.0f;
 static int p_boost = 0, p_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
@@ -212,7 +213,7 @@ static void spawn_snake(int i)
     
     if (i == 0) {
         s->len = 30;
-        s->immune = 180;
+        s->immune = 180; // 3 segundos de imunidade no spawn
     } else {
         s->len = 25 + (rand() % 70);
         s->immune = 0;
@@ -241,9 +242,9 @@ static void bot_think(int i)
 {
     Snake *s = &sn[i];
     float hx = s->x[0], hy = s->y[0];
-    s->tgt += (frand() - 0.5f) * 0.3f;
+    s->tgt += (frand() - 0.5f) * 0.2f;
 
-    if (s->tick % 5 == 0) {
+    if (s->tick % 10 == 0) {
         float best = 500.0f * 500.0f;
         int bi = -1;
         for (int k = 0; k < NPEL; k++) {
@@ -269,24 +270,25 @@ static void update_snake(int i)
     if (s->immune > 0) s->immune--;
 
     if (i == 0) {
-        s->tgt = player_target_ang;
+        s->tgt = player_angle;
         s->boost = p_boost;
     } else {
         bot_think(i);
-        s->boost = (s->len > 40 && (s->tick / 120) % 4 == 0) ? 1 : 0;
+        s->boost = (s->len > 40 && (s->tick / 180) % 4 == 0) ? 1 : 0;
     }
 
+    // Suavização rigorosa da rotação para acabar com a tremedeira da cabeça
     float d = s->tgt - s->ang;
     while (d > PI) d -= 2 * PI;
     while (d < -PI) d += 2 * PI;
-    if (d > 0.15f) d = 0.15f;
-    if (d < -0.15f) d = -0.15f;
+    if (d > 0.08f) d = 0.08f;
+    if (d < -0.08f) d = -0.08f;
     s->ang += d;
 
     float sp = 3.5f;
     if (s->boost && s->len > 15) {
         sp = 6.0f;
-        if (s->tick % 8 == 0) {
+        if (s->tick % 10 == 0) {
             s->len--;
             add_pellet(s->x[s->len], s->y[s->len], 1, 0);
         }
@@ -294,14 +296,15 @@ static void update_snake(int i)
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
     
-    for (int iter = 0; iter < 3; iter++) {
+    // Múltiplas passagens de física sem lag para endireitar o corpo perfeitamente
+    for (int iter = 0; iter < 2; iter++) {
         for (int j = 1; j < s->len; j++) {
             float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
             float dd = sqrtf(dx * dx + dy * dy);
             if (dd > 5.0f) {
                 float f = (dd - 5.0f) / dd;
-                s->x[j] += dx * f * 0.5f;
-                s->y[j] += dy * f * 0.5f;
+                s->x[j] += dx * f * 0.6f;
+                s->y[j] += dy * f * 0.6f;
             }
         }
     }
@@ -352,28 +355,35 @@ static void read_pad(void)
 {
     padInfo info;
     padData d;
-    p_boost = p_x = 0;
+    p_boost = 0;
+    p_x = 0;
     
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
         
-        // CONTROLO DIRETO NAS SETINHAS (D-PAD) E ANALÓGICO
-        if (d.BTN_LEFT)  player_target_ang = PI;       // Esquerda
-        if (d.BTN_RIGHT) player_target_ang = 0.0f;     // Direita
-        if (d.BTN_UP)    player_target_ang = -PI / 2;  // Cima
-        if (d.BTN_DOWN)  player_target_ang = PI / 2;   // Baixo
-
-        // Suporte opcional ao analógico caso funcione
+        // Leitura limpa do analógico L3 com zona morta rigorosa para evitar bloqueios
         float ax = ((int)d.ANA_L_H - 128) / 128.0f;
         float ay = ((int)d.ANA_L_V - 128) / 128.0f;
+        
+        if (d.BTN_LEFT) ax = -1.0f;
+        if (d.BTN_RIGHT) ax = 1.0f;
+        if (d.BTN_UP) ay = -1.0f;
+        if (d.BTN_DOWN) ay = 1.0f;
+        
         float mag = sqrtf(ax * ax + ay * ay);
-        if (mag > 0.2f) {
-            player_target_ang = atan2f(ay, ax);
+        if (mag > 0.18f) {
+            player_angle = atan2f(ay, ax);
         }
         
-        p_boost = d.BTN_CROSS;
-        p_x = d.BTN_CROSS;
+        // Turbo só ativa se o botão X estiver explicitamente premido
+        if (d.BTN_CROSS) {
+            p_boost = 1;
+            p_x = 1;
+        } else {
+            p_boost = 0;
+            p_x = 0;
+        }
     }
 }
 
@@ -383,12 +393,13 @@ static void update_game(void)
 
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
-    for (int n = 0; n < 4 && count < NPEL - 50; n++, count++)
+    for (int n = 0; n < 3 && count < NPEL - 50; n++, count++)
         add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0), rand() % 5 == 0 ? 1 : 0);
 
+    // Suavização do movimento da câmara para eliminar qualquer lag visual
     if (sn[0].alive) {
-        camx = sn[0].x[0];
-        camy = sn[0].y[0];
+        camx += (sn[0].x[0] - camx) * 0.2f;
+        camy += (sn[0].y[0] - camy) * 0.2f;
     }
 
     if (!sn[0].alive) {
@@ -423,6 +434,7 @@ static void render(void)
         }
     }
 
+    // Desenhar Comida / Hotdogs 🌭
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw);
@@ -482,7 +494,7 @@ static void render(void)
     sprintf(buf, "%d", sn[0].score);
     draw_text(buf, 24, 20 + 7 * ui, ui + 2, 0x00FFD23F);
 
-    draw_text("X: TURBO | SETINHAS: MOVER", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
+    draw_text("X: TURBO", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
 
     if (!sn[0].alive) {
         int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
