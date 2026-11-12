@@ -1,4 +1,4 @@
-// Cobra Arena - Controlo L3 Definitivo para PS3 (PSL1GHT)
+// Cobra Arena - Controlo L3 e Render Perfeito para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -212,7 +212,7 @@ static void spawn_snake(int i)
     
     if (i == 0) {
         s->len = 30;
-        s->immune = 180; // 3 segundos de imunidade para arrancar descansado
+        s->immune = 180;
     } else {
         s->len = 25 + (rand() % 70);
         s->immune = 0;
@@ -356,7 +356,6 @@ static void read_pad(void)
     if (info.status[0]) {
         ioPadGetData(0, &d);
         
-        // Leitura direta e sensível do Analógico Esquerdo (L3) e D-Pad
         int lx = (int)d.ANA_L_H - 128;
         int ly = (int)d.ANA_L_V - 128;
         
@@ -424,14 +423,12 @@ static void render(void)
         }
     }
 
-    // Desenhar Comida / Hotdogs 🌭
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw);
         int py = (int)((pel[k].y - camy) * sc + hh);
         if (px >= -15 && px < (int)W + 15 && py >= -15 && py < (int)H + 15) {
             if (pel[k].type == 1) {
-                // Hotdog 🌭 Pixel Art
                 fill_rect(px - 6, py - 2, 12, 5, 0x00FF9F43); 
                 fill_rect(px - 4, py - 1, 8, 2, 0x00FF4D4D);  
             } else {
@@ -488,4 +485,32 @@ static void render(void)
     draw_text("X: TURBO", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
 
     if (!sn[0].alive) {
-        
+        int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
+        fill_rect((int)W / 2 - bw / 2, (int)H / 2 - bh / 2, bw, bh, 0x00000000);
+        draw_text("GAME OVER", (int)W / 2 - text_width("GAME OVER", ui * 2) / 2, (int)H / 2 - bh / 2 + 24, ui * 2, 0x00FF4D4D);
+        if (dead_t > 60)
+            draw_text("PRESS X TO RESPAWN", (int)W / 2 - text_width("PRESS X TO RESPAWN", ui) / 2, (int)H / 2 + ui * 3, ui, 0x00FFFFFF);
+    }
+}
+
+int main(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    
+    // Chamadas explícitas para evitar erros de funções não utilizadas no build
+    init_screen();
+    ioPadInit(7);
+    sysUtilRegisterCallback(0, sysutil_cb, NULL);
+    
+    srand(20261109);
+    init_game();
+
+    while (running) {
+        sysUtilCheckCallback();
+        read_pad();
+        update_game();
+        render();
+        present(); // Chamado explicitamente aqui
+    }
+    return 0;
+}
