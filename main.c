@@ -1,5 +1,4 @@
-
-// Pou PS3 - Bichinho Virtual 3D (PSL1GHT)
+// Mob Control PS3 - Estilo Arcade (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -126,10 +125,11 @@ static const Glyph glyphs[] = {
     {'C', "###" "#.." "#.." "#.." "###"}, {'E', "###" "#.." "###" "#.." "###"},
     {'F', "###" "#.." "##." "#.." "#.."}, {'G', "###" "#.." "#.#" "#.#" "###"},
     {'H', "#.#" "#.#" "###" "#.#" "#.#"}, {'I', "###" ".#." ".#." ".#." "###"},
-    {'L', "#.." "#.." "#.." "#.." "###"}, {'M', "#.#" "###" "###" "#.#" "#.#"},
+    {'L', "#.." "#.." "#.." "#.." "###"}, {'M', "#.#" "#.#" "###" "#.#" "#.#"},
     {'O', "###" "#.#" "#.#" "#.#" "###"}, {'P', "###" "#.#" "###" "#.." "#.."},
     {'R', "##." "#.#" "##." "#.#" "#.#"}, {'S', "###" "#.." "###" "..#" "###"},
     {'T', "###" ".#." ".#." ".#." ".#."}, {'U', "#.#" "#.#" "#.#" "#.#" "###"},
+    {'+', ".#." "###" ".#." "..." "..."}, {'X', "#.#" "#.#" ".#." "#.#" "#.#"},
 };
 
 static const char *find_glyph(char c)
@@ -153,97 +153,48 @@ static void draw_text(const char *s, int x, int y, int sc, u32 c)
     }
 }
 
-/* ---------- JOGO POU ---------- */
-static int pou_hunger = 80;   // Fome (0 a 100)
-static int pou_energy = 90;   // Energia (0 a 100)
-static int pou_coins = 150;   // Moedas
-static int pou_happy = 85;    // Felicidade
-static int food_x = 0, food_y = 0, food_active = 0;
-static int tick_counter = 0;
+/* ---------- VARIÁVEIS DO JOGO MOB CONTROL ---------- */
+#define MAX_MOBS 100
 
-static void init_pou(void)
+typedef struct {
+    float x, y;
+    int active;
+} Mob;
+
+static Mob mobs[MAX_MOBS];
+static float cannon_x = 640.0f;
+static int mob_count = 12;
+static int score = 0;
+static int enemy_base_hp = 500;
+static int fire_cooldown = 0;
+
+static void init_game(void)
 {
-    pou_hunger = 80;
-    pou_energy = 90;
-    pou_coins = 150;
-    pou_happy = 85;
-    food_active = 0;
+    cannon_x = 640.0f;
+    mob_count = 15;
+    score = 0;
+    enemy_base_hp = 500;
+    memset(mobs, 0, sizeof(mobs));
 }
 
-static void update_pou(void)
+static void update_game(void)
 {
-    tick_counter++;
-    // O Pou vai perdendo fome e energia devagar com o tempo
-    if (tick_counter % 300 == 0) {
-        if (pou_hunger > 0) pou_hunger--;
-        if (pou_energy > 0) pou_energy--;
-        if (pou_happy > 0 && pou_hunger < 30) pou_happy--;
-    }
-}
-
-static void render_pou(void)
-{
-    u32 n = W * H;
-    // Fundo aconchegante de quarto do Pou (cor creme suave)
-    for (u32 i = 0; i < n; i++) back[i] = 0x002A2438;
-
-    // Chão da sala
-    fill_rect(0, (int)H - 180, W, 180, 0x005D4037);
-    fill_rect(0, (int)H - 190, W, 10, 0x003E2723);
-
-    int cx = (int)W / 2;
-    int cy = (int)H / 2 + 30;
-    int pou_w = 160;
-    int pou_h = 140;
-
-    // --- DESENHO DO POU (Forma piriforme clássica) ---
-    // Corpo principal castanho/azeitona do Pou
-    circle(cx, cy + 20, 75, 0x008D6E63);
-    circle(cx, cy - 10, 70, 0x008D6E63);
-    fill_rect(cx - 70, cy - 10, 140, 60, 0x008D6E63);
-
-    // Olhos grandes do Pou
-    circle(cx - 30, cy - 15, 18, 0x00FFFFFF); // Olho esquerdo fundo
-    circle(cx + 30, cy - 15, 18, 0x00FFFFFF); // Olho direito fundo
-    
-    // pupilas pretas
-    circle(cx - 28 + (pou_hunger < 30 ? 2 : 0), cy - 15, 8, 0x00111111);
-    circle(cx + 32, cy - 15, 8, 0x00111111);
-
-    // Sorriso do Pou
-    fill_rect(cx - 20, cy + 25, 40, 4, 0x003E2723);
-    fill_rect(cx - 24, cy + 20, 4, 5, 0x003E2723);
-    fill_rect(cx + 20, cy + 20, 4, 5, 0x003E2723);
-
-    // --- COMIDA NO ECRÃ (SE DISPONÍVEL) ---
-    if (food_active) {
-        // Desenho de um bolo / comida 🍔
-        fill_rect(food_x - 15, food_y - 8, 30, 16, 0x00FFD23F);
-        fill_rect(food_x - 12, food_y - 14, 24, 6, 0x00FF7043);
-        circle(food_x, food_y - 14, 5, 0x00FF4D4D); // Cereja em cima
+    // Movimento dos mobs para cima rumo à base inimiga
+    for (int i = 0; i < MAX_MOBS; i++) {
+        if (mobs[i].active) {
+            mobs[i].y -= 6.0f;
+            
+            // Colisão com a base inimiga no topo (y < 150)
+            if (mobs[i].y < 150.0f) {
+                mobs[i].active = 0;
+                enemy_base_hp--;
+                score += 10;
+                if (enemy_base_hp < 0) enemy_base_hp = 500; // Reseta base se destruir
+            }
+        }
     }
 
-    // --- PAINEL DE ESTADOS (HUD) ---
-    // Barra de Fome
-    draw_text("FOME", 40, 40, 3, 0x00FFFFFF);
-    fill_rect(130, 42, 200, 20, 0x00424242);
-    fill_rect(130, 42, pou_hunger * 2, 20, 0x0066BB6A);
-
-    // Barra de Energia
-    draw_text("ENERGIA", 40, 80, 3, 0x00FFFFFF);
-    fill_rect(130, 82, 200, 20, 0x00424242);
-    fill_rect(130, 82, pou_energy * 2, 20, 0x0042A5F5);
-
-    // Moedas e Felicidade
-    char buf[32];
-    sprintf(buf, "COINS: %d", pou_coins);
-    draw_text(buf, (int)W - 320, 40, 3, 0x00FFD23F);
-
-    sprintf(buf, "HAP: %d", pou_happy);
-    draw_text(buf, (int)W - 320, 80, 3, 0x00FF8FAB);
-
-    // Menu de Ajuda / Comandos no Rodapé
-    draw_text("X: DAR COMIDA  |  O: DORMIR/ACORDAR  |  START: SAIR", 60, (int)H - 60, 3, 0x00B0BEC5);
+    if (fire_cooldown > 0) fire_cooldown--;
 }
 
 static void read_pad(void)
@@ -254,28 +205,78 @@ static void read_pad(void)
     if (info.status[0]) {
         ioPadGetData(0, &d);
 
-        // Botão X: Dá comida ao Pou (aumenta fome e moedas)
-        if (d.BTN_CROSS) {
-            if (pou_hunger < 100) {
-                pou_hunger += 2;
-                if (pou_hunger > 100) pou_hunger = 100;
-                pou_coins += 5;
-                pou_happy += 1;
-                if (pou_happy > 100) pou_happy = 100;
-            }
-            food_x = (int)W / 2 + (rand() % 100 - 50);
-            food_y = (int)H / 2 + 100;
-            food_active = 1;
+        // CONTROLO NAS SETINHAS (D-PAD) - SUPER FÁCIL E PRECISO!
+        if (d.BTN_LEFT) {
+            cannon_x -= 12.0f;
+            if (cannon_x < 250.0f) cannon_x = 250.0f;
+        }
+        if (d.BTN_RIGHT) {
+            cannon_x += 12.0f;
+            if (cannon_x > 1030.0f) cannon_x = 1030.0f;
         }
 
-        // Botão Bolinha (O): Descansar / Dormir (recupera energia)
-        if (d.BTN_CIRCLE) {
-            if (pou_energy < 100) {
-                pou_energy += 3;
-                if (pou_energy > 100) pou_energy = 100;
+        // BOTÃO X: Dispara bonecos azuis para cima
+        if (d.BTN_CROSS && fire_cooldown == 0) {
+            for (int i = 0; i < MAX_MOBS; i++) {
+                if (!mobs[i].active) {
+                    mobs[i].x = cannon_x + (rand() % 40 - 20);
+                    mobs[i].y = (float)H - 180.0f;
+                    mobs[i].active = 1;
+                    break;
+                }
             }
+            fire_cooldown = 6; // Taxa de disparo
         }
     }
+}
+
+static void render(void)
+{
+    u32 n = W * H;
+    // Fundo estilo deserto / arena do Mob Control
+    for (u32 i = 0; i < n; i++) back[i] = 0x002C3E50;
+
+    // Pista central de corrida
+    fill_rect(200, 0, 880, H, 0x0034495E);
+
+    // --- BASE INIMIGA NO TOPO ---
+    fill_rect(340, 50, 600, 90, 0x00E74C3C);
+    draw_text("BASE INIMIGA", 480, 75, 4, 0x00FFFFFF);
+
+    char buf[32];
+    sprintf(buf, "HP: %d", enemy_base_hp);
+    draw_text(buf, 540, 110, 3, 0x00FFD23F);
+
+    // --- PORTAS MULTIPLICADORAS NO CAMINHO ---
+    // Porta Azul (+10)
+    fill_rect(380, 350, 220, 50, 0x003498DB);
+    draw_text("+ 10", 440, 365, 4, 0x00FFFFFF);
+
+    // Porta Dourada (X2)
+    fill_rect(680, 350, 220, 50, 0x00F1C40F);
+    draw_text("X 2", 760, 365, 4, 0x00111111);
+
+    // --- DESENHAR OS MOBS (Bonecos Azuis) ---
+    for (int i = 0; i < MAX_MOBS; i++) {
+        if (mobs[i].active) {
+            // Boneco azul simples (cabeça e corpo)
+            circle((int)mobs[i].x, (int)mobs[i].y - 8, 6, 0x0055D6FF); // Cabeça
+            fill_rect((int)mobs[i].x - 4, (int)mobs[i].y - 2, 8, 12, 0x003498DB); // Corpo
+        }
+    }
+
+    // --- CANHÃO NA BASE (Controlado pelas Setinhas) ---
+    fill_rect((int)cannon_x - 35, (int)H - 140, 70, 50, 0x002980B9);
+    circle((int)cannon_x, (int)H - 140, 25, 0x0055D6FF);
+
+    // --- HUD / PLACAR ---
+    draw_text("SCORE", 40, 40, 3, 0x00FFFFFF);
+    sprintf(buf, "%d", score);
+    draw_text(buf, 40, 70, 4, 0x00FFD23F);
+
+    // Instruções no rodapé
+    draw_text("USE AS SETINHAS (ESQ / DIR) PARA MOVER O CANHAO", 180, (int)H - 70, 3, 0x00BDC3C7);
+    draw_text("APERTE X PARA DISPARAR EXERCITO", 320, (int)H - 40, 3, 0x0055D6FF);
 }
 
 int main(int argc, char **argv)
@@ -285,13 +286,13 @@ int main(int argc, char **argv)
     ioPadInit(7);
     sysUtilRegisterCallback(0, sysutil_cb, NULL);
     srand(20261111);
-    init_pou();
+    init_game();
 
     while (running) {
         sysUtilCheckCallback();
         read_pad();
-        update_pou();
-        render_pou();
+        update_game();
+        render();
         present();
     }
     return 0;
