@@ -8,7 +8,7 @@
 #include <ppu-types.h>
 #include <sysutil/sysutil.h>
 #include <sysutil/video.h>
-#include <rsx/gcm.h>
+#include <rsx/rsx.h>
 #include <io/pad.h>
 
 #define CB_SIZE   (0x100000)
