@@ -1,4 +1,4 @@
-// Cobra Arena - Slither.io Definitivo para PS3 (PSL1GHT)
+// Cobra Arena - Controlo por Setinhas (D-Pad) Definitivo para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +16,7 @@
 
 #define WORLD  6000.0f
 #define MAXSEG 600
-#define NSN    14       // 1 Jogador + 13 Bots
+#define NSN    14
 #define NPEL   900
 #define PI     3.14159265f
 
@@ -177,8 +177,7 @@ static Pellet pel[NPEL];
 static int pelrot = 0, dead_t = 0, x_prev = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
 
-// Variáveis limpas para o controlo exclusivo do Jogador 1
-static float player_angle = 0.0f;
+static float player_target_ang = 0.0f;
 static int p_boost = 0, p_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
@@ -213,7 +212,7 @@ static void spawn_snake(int i)
     
     if (i == 0) {
         s->len = 30;
-        s->immune = 180; // 3 segundos de imunidade ao renascer
+        s->immune = 180;
     } else {
         s->len = 25 + (rand() % 70);
         s->immune = 0;
@@ -270,7 +269,7 @@ static void update_snake(int i)
     if (s->immune > 0) s->immune--;
 
     if (i == 0) {
-        s->tgt = player_angle;
+        s->tgt = player_target_ang;
         s->boost = p_boost;
     } else {
         bot_think(i);
@@ -295,7 +294,6 @@ static void update_snake(int i)
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
     
-    // Suavização do corpo para eliminar qualquer tremida
     for (int iter = 0; iter < 3; iter++) {
         for (int j = 1; j < s->len; j++) {
             float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
@@ -360,18 +358,18 @@ static void read_pad(void)
     if (info.status[0]) {
         ioPadGetData(0, &d);
         
-        // Leitura direta e sem falhas do Analógico Esquerdo (L3)
+        // CONTROLO DIRETO NAS SETINHAS (D-PAD) E ANALÓGICO
+        if (d.BTN_LEFT)  player_target_ang = PI;       // Esquerda
+        if (d.BTN_RIGHT) player_target_ang = 0.0f;     // Direita
+        if (d.BTN_UP)    player_target_ang = -PI / 2;  // Cima
+        if (d.BTN_DOWN)  player_target_ang = PI / 2;   // Baixo
+
+        // Suporte opcional ao analógico caso funcione
         float ax = ((int)d.ANA_L_H - 128) / 128.0f;
         float ay = ((int)d.ANA_L_V - 128) / 128.0f;
-        
-        if (d.BTN_LEFT) ax = -1.0f;
-        if (d.BTN_RIGHT) ax = 1.0f;
-        if (d.BTN_UP) ay = -1.0f;
-        if (d.BTN_DOWN) ay = 1.0f;
-        
         float mag = sqrtf(ax * ax + ay * ay);
-        if (mag > 0.15f) {
-            player_angle = atan2f(ay, ax);
+        if (mag > 0.2f) {
+            player_target_ang = atan2f(ay, ax);
         }
         
         p_boost = d.BTN_CROSS;
@@ -425,7 +423,6 @@ static void render(void)
         }
     }
 
-    // Desenhar Comida / Hotdogs 🌭
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw);
@@ -464,7 +461,6 @@ static void render(void)
         }
     }
 
-    // Minimapa (Radar) no canto superior direito
     int m_w = 160, m_h = 160;
     int m_x = (int)W - m_w - 24, m_y = 24;
     fill_rect(m_x - 2, m_y - 2, m_w + 4, m_h + 4, 0x00FFFFFF);
@@ -486,7 +482,7 @@ static void render(void)
     sprintf(buf, "%d", sn[0].score);
     draw_text(buf, 24, 20 + 7 * ui, ui + 2, 0x00FFD23F);
 
-    draw_text("X: TURBO", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
+    draw_text("X: TURBO | SETINHAS: MOVER", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
 
     if (!sn[0].alive) {
         int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
