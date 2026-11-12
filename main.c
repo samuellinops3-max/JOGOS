@@ -1,4 +1,4 @@
-// Cobra Arena - Otimizado para PS3 (PSL1GHT)
+// Cobra Arena - Otimizado e Ajustado para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,10 +14,10 @@
 #define CB_SIZE   (0x100000)
 #define HOST_SIZE (32 * 1024 * 1024)
 
-#define WORLD  6000.0f
-#define MAXSEG 500
-#define NSN    12
-#define NPEL   1200
+#define WORLD  2500.0f  // Mapa reduzido para muita acao rapida
+#define MAXSEG 300
+#define NSN    18       // Mais cobras bots no mapa
+#define NPEL   800      // Comida super recheada
 #define PI     3.14159265f
 
 typedef struct {
@@ -183,7 +183,7 @@ static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
 static float radius_of(const Snake *s)
 {
-    int l = s->len > 300 ? 300 : s->len;
+    int l = s->len > 200 ? 200 : s->len;
     return 16.0f + l * 0.05f; 
 }
 
@@ -203,16 +203,12 @@ static void add_pellet(float x, float y, int size)
 static void spawn_snake(int i)
 {
     Snake *s = &sn[i];
-    float x = 800.0f + frand() * (WORLD - 1600.0f);
-    float y = 800.0f + frand() * (WORLD - 1600.0f);
+    float x = 300.0f + frand() * (WORLD - 600.0f);
+    float y = 300.0f + frand() * (WORLD - 600.0f);
     s->ang = frand() * 2 * PI;
     s->tgt = s->ang;
     
-    if (i == 0) {
-        s->len = 25;
-    } else {
-        s->len = 20 + (rand() % 70);
-    }
+    s->len = (i == 0) ? 25 : (15 + (rand() % 40));
 
     for (int j = 0; j < s->len; j++) {
         s->x[j] = x - cosf(s->ang) * 4.5f * j;
@@ -225,10 +221,12 @@ static void spawn_snake(int i)
 static void kill_snake(int i)
 {
     Snake *s = &sn[i];
-    for (int j = 0; j < s->len; j += 2)
-        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
+    // Deixa uma explosão rica de comida em volta de todo o corpo da cobra derrotada
+    for (int j = 0; j < s->len; j += 1) {
+        add_pellet(s->x[j] + (frand() - 0.5f) * 25, s->y[j] + (frand() - 0.5f) * 25, 2);
+    }
     s->alive = 0;
-    s->respawn = 180;
+    s->respawn = 120;
     if (i == 0) dead_t = 0;
 }
 
@@ -236,10 +234,10 @@ static void bot_think(int i)
 {
     Snake *s = &sn[i];
     float hx = s->x[0], hy = s->y[0];
-    s->tgt += (frand() - 0.5f) * 0.3f;
+    s->tgt += (frand() - 0.5f) * 0.4f;
 
-    if (s->tick % 5 == 0) {
-        float best = 500.0f * 500.0f;
+    if (s->tick % 4 == 0) {
+        float best = 300.0f * 300.0f;
         int bi = -1;
         for (int k = 0; k < NPEL; k++) {
             if (!pel[k].active) continue;
@@ -249,7 +247,7 @@ static void bot_think(int i)
         if (bi >= 0) s->tgt = atan2f(pel[bi].y - hy, pel[bi].x - hx);
     }
 
-    if (hx < 400 || hx > WORLD - 400 || hy < 400 || hy > WORLD - 400)
+    if (hx < 200 || hx > WORLD - 200 || hy < 200 || hy > WORLD - 200)
         s->tgt = atan2f(WORLD / 2 - hy, WORLD / 2 - hx);
 }
 
@@ -266,20 +264,20 @@ static void update_snake(int i)
         s->boost = pad_boost;
     } else {
         bot_think(i);
-        s->boost = (s->len > 40 && (s->tick / 120) % 4 == 0) ? 1 : 0;
+        s->boost = (s->len > 35 && (s->tick / 80) % 3 == 0) ? 1 : 0;
     }
 
     float d = s->tgt - s->ang;
     while (d > PI) d -= 2 * PI;
     while (d < -PI) d += 2 * PI;
-    if (d > 0.08f) d = 0.08f;
-    if (d < -0.08f) d = -0.08f;
+    if (d > 0.1f) d = 0.1f;
+    if (d < -0.1f) d = -0.1f;
     s->ang += d;
 
-    float sp = 3.2f;
+    float sp = 3.5f;
     if (s->boost && s->len > 15) {
-        sp = 5.8f;
-        if (s->tick % 8 == 0) {
+        sp = 6.0f;
+        if (s->tick % 6 == 0) {
             s->len--;
             add_pellet(s->x[s->len], s->y[s->len], 1);
         }
@@ -331,7 +329,7 @@ static void update_snake(int i)
 static void init_game(void)
 {
     memset(pel, 0, sizeof(pel));
-    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
+    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
     for (int i = 0; i < NSN; i++) { sn[i].score = 0; spawn_snake(i); }
     dead_t = 0;
 }
@@ -343,17 +341,16 @@ static void read_pad(void)
     pad_ax = pad_ay = pad_mag = 0;
     pad_boost = pad_x = 0;
     ioPadGetInfo(&info);
-    if (info.status[0]) {
-        ioPadGetData(0, &d);
+    if (info.status[0] || info.status[1]) {
+        int p = info.status[0] ? 0 : 1;
+        ioPadGetData(p, &d);
         
-        // Leitura prioritária e direta pelo D-PAD (funciona em qualquer comando paralelo/Paraguai)
         float ax = 0, ay = 0;
         if (d.BTN_LEFT)  ax = -1.0f;
         if (d.BTN_RIGHT) ax =  1.0f;
         if (d.BTN_UP)    ay = -1.0f;
         if (d.BTN_DOWN)  ay =  1.0f;
         
-        // Se o D-Pad não estiver a ser usado, usa o analógico com margem segura
         if (ax == 0 && ay == 0) {
             float al_h = ((int)d.ANA_L_H - 128) / 128.0f;
             float al_v = ((int)d.ANA_L_V - 128) / 128.0f;
@@ -379,15 +376,15 @@ static void update_game(void)
 
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
-    for (int n = 0; n < 8 && count < NPEL - 20; n++, count++)
-        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 4 == 0));
+    for (int n = 0; n < 12 && count < NPEL - 30; n++, count++)
+        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
 
     if (sn[0].alive) {
         camx = sn[0].x[0];
         camy = sn[0].y[0];
     } else {
         dead_t++;
-        if (dead_t > 60 && pad_x && !x_prev) {
+        if (dead_t > 40 && pad_x && !x_prev) {
             spawn_snake(0);
             sn[0].score = 0;
         }
@@ -410,11 +407,11 @@ static void render(void)
     if (sy0 > 0) fill_rect(0, 0, W, sy0, red);
     if (sy1 < (int)H) fill_rect(0, sy1, W, H - sy1, red);
 
-    float gx0 = floorf((camx - hw / sc) / 120.0f) * 120.0f;
-    float gy0 = floorf((camy - hh / sc) / 120.0f) * 120.0f;
-    for (float gx = gx0; gx < camx + hw / sc; gx += 120.0f) {
+    float gx0 = floorf((camx - hw / sc) / 100.0f) * 100.0f;
+    float gy0 = floorf((camy - hh / sc) / 100.0f) * 100.0f;
+    for (float gx = gx0; gx < camx + hw / sc; gx += 100.0f) {
         if (gx < 0 || gx > WORLD) continue;
-        for (float gy = gy0; gy < camy + hh / sc; gy += 120.0f) {
+        for (float gy = gy0; gy < camy + hh / sc; gy += 100.0f) {
             if (gy < 0 || gy > WORLD) continue;
             fill_rect((int)((gx - camx) * sc + hw), (int)((gy - camy) * sc + hh), 3, 3, 0x001A2636);
         }
@@ -424,7 +421,7 @@ static void render(void)
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
         if (px >= -20 && px < (int)W + 20 && py >= -20 && py < (int)H + 20) {
-            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col);
+            circle(px, py, (int)((4 + pel[k].size * 2) * sc), pel[k].col);
             circle(px, py, (int)(2 * sc), 0x00FFFFFF);
         }
     }
@@ -462,7 +459,7 @@ static void render(void)
         int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
         fill_rect((int)W / 2 - bw / 2, (int)H / 2 - bh / 2, bw, bh, 0x00000000);
         draw_text("GAME OVER", (int)W / 2 - text_width("GAME OVER", ui * 2) / 2, (int)H / 2 - bh / 2 + 24, ui * 2, 0x00FF4D4D);
-        if (dead_t > 60)
+        if (dead_t > 40)
             draw_text("PRESS X TO RESPAWN", (int)W / 2 - text_width("PRESS X TO RESPAWN", ui) / 2, (int)H / 2 + ui * 3, ui, 0x00FFFFFF);
     }
 }
