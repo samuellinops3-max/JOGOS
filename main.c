@@ -1,5 +1,5 @@
 // Cobra Arena - Estilo Slither.io Otimizado para PS3 (PSL1GHT)
-// Versao 2: mais cobras, cobras mais grossas, minimapa maior, comida em forma de bolo 🎂
+// Versao 3: cobras com skins aleatorias, minimapa menor, comida em forma de bolo 🎂
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,16 +17,18 @@
 
 #define WORLD  12000.0f   // mapa grande
 #define MAXSEG 900        // cobras podem ficar bem compridas
-#define NSN    35         // mais cobras no mapa (era 20)
-#define NPEL   4000       // mais bolos espalhados (era 2500)
+#define NSN    35         // mais cobras no mapa
+#define NPEL   4000       // mais bolos espalhados
 #define SEGD   5.0f       // distancia entre segmentos
 #define PI     3.14159265f
+#define NSKIN  5          // quantidade de skins diferentes
 
 typedef struct {
     float x[MAXSEG], y[MAXSEG];
     int len, alive, respawn, boost, grow, score, tick, inv;
     float ang, tgt;
-    u32 col;
+    u32 col, col2;   // cor principal e cor secundaria da skin
+    int skin;        // padrao da skin (0..NSKIN-1)
 } Snake;
 
 typedef struct {
@@ -194,11 +196,23 @@ static int pad_boost = 0, pad_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
-// Cobras mais grossas (base 24, era 18) e ainda engrossam conforme crescem
+// Cobras mais grossas (base 24) e ainda engrossam conforme crescem
 static float radius_of(const Snake *s)
 {
     int l = s->len > 700 ? 700 : s->len;
     return 24.0f + l * 0.045f;
+}
+
+// Cor do segmento j, de acordo com a skin da cobra
+static u32 seg_color(const Snake *s, int j)
+{
+    switch (s->skin) {
+    case 0:  return ((j / 3) % 2) ? s->col : s->col2;          // listras
+    case 1:  return (j % 4 == 0) ? s->col2 : s->col;           // manchas
+    case 2:  return (j % 6 < 3) ? s->col : s->col2;            // aneis
+    case 3:  return (j % 2) ? s->col : ((s->col >> 1) & 0x007F7F7F); // escamas
+    default: return s->col;                                    // lisa
+    }
 }
 
 static void add_pellet(float x, float y, int size)
@@ -231,7 +245,12 @@ static void spawn_snake(int i)
     }
     s->alive = 1; s->respawn = 0; s->boost = 0; s->grow = 0; s->tick = 0;
     s->inv = 90;  // 1,5s de protecao ao nascer
-    s->col = palette[(i + rand()) % 8];
+
+    // Skin aleatoria: duas cores e um padrao diferente pra cada cobra
+    s->col  = palette[rand() % 8];
+    s->col2 = palette[rand() % 8];
+    if (s->col2 == s->col) s->col2 = palette[(rand() % 7 + 1 + (s->col - palette[0]) / 0x1) % 8];
+    s->skin = rand() % NSKIN;
 }
 
 static void kill_snake(int i)
@@ -447,15 +466,16 @@ static void draw_cake(int x, int y, int u, u32 frost, u32 sponge)
     circle(x, y - 7 * u, (u / 4) + 1, 0x00FFF176);                     // miolo da chama
 }
 
+// Minimapa menor, no canto superior direito, pra nao atrapalhar a tela
 static void draw_minimap(float sc, float hw, float hh, float base)
 {
-    int msz = (int)(320 * base);   // minimapa maior (era 220)
-    if (msz < 160) msz = 160;
-    int mar = (int)(30 * base);
+    int msz = (int)(170 * base);
+    if (msz < 110) msz = 110;
+    int mar = (int)(14 * base);
     int mx = (int)W - msz - mar, my = mar;
     float ms = (float)msz / WORLD;
 
-    fill_rect(mx - 4, my - 4, msz + 8, msz + 8, 0x00C8D4E0);  // borda
+    fill_rect(mx - 2, my - 2, msz + 4, msz + 4, 0x00C8D4E0);  // borda
     fill_rect(mx, my, msz, msz, 0x00080D14);                  // fundo
 
     // Retangulo da area visivel na tela
@@ -469,26 +489,22 @@ static void draw_minimap(float sc, float hw, float hh, float base)
     fill_rect(rx0, ry0, 1, ry1 - ry0, vc);
     fill_rect(rx1 - 1, ry0, 1, ry1 - ry0, vc);
 
-    int hs = (int)(5 * base + 0.5f);
-    if (hs < 4) hs = 4;
+    int hs = (int)(3 * base + 0.5f);
+    if (hs < 3) hs = 3;
 
-    // Bots: corpo em pontinhos e cabeca maior pra facilitar ver
+    // Bots: so a cabeca, pra nao poluir o minimapa
     for (int i = NSN - 1; i >= 1; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
-        for (int j = 10; j < s->len; j += 10)
-            dot(mx + (int)(s->x[j] * ms), my + (int)(s->y[j] * ms), 3, s->col);
         dot(mx + (int)(s->x[0] * ms), my + (int)(s->y[0] * ms), hs, s->col);
     }
 
-    // Jogador por ultimo, em branco e maior
+    // Jogador por ultimo, em branco
     if (sn[0].alive) {
         Snake *s = &sn[0];
-        for (int j = 10; j < s->len; j += 10)
-            dot(mx + (int)(s->x[j] * ms), my + (int)(s->y[j] * ms), 3, 0x00FFFFFF);
         int px = mx + (int)(s->x[0] * ms), py = my + (int)(s->y[0] * ms);
-        dot(px, py, hs + 5, 0x00000000);
-        dot(px, py, hs + 3, 0x00FFFFFF);
+        dot(px, py, hs + 3, 0x00000000);
+        dot(px, py, hs + 1, 0x00FFFFFF);
     }
 }
 
@@ -531,21 +547,21 @@ static void render(void)
         draw_cake(px, py + bob, u, pel[k].col, sponge);
     }
 
-    // Cobras grandes (pula segmentos fora da tela; bots desenham de 3 em 3 pra ganhar FPS)
+    // Cobras com skins (pula segmentos fora da tela; bots desenham de 3 em 3 pra ganhar FPS)
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
         int r = (int)(radius_of(s) * sc);
         if (r < 3) r = 3;
-        u32 dark = (s->col >> 1) & 0x007F7F7F;
-        // Piscando enquanto esta protegida
-        if (s->inv > 0 && (frame / 4) % 2 == 0) { dark = s->col; }
 
         int step = (i == 0) ? 2 : 3;
         for (int j = s->len - 1; j >= 0; j -= step) {
             int px = (int)((s->x[j] - camx) * sc + hw), py = (int)((s->y[j] - camy) * sc + hh);
             if (px < -r || px > (int)W + r || py < -r || py > (int)H + r) continue;
-            circle(px, py, r, (j % 4 < 2) ? s->col : dark);
+            u32 c = seg_color(s, j);
+            // Piscando enquanto esta protegida
+            if (s->inv > 0 && (frame / 4) % 2 == 0) c = s->col;
+            circle(px, py, r, c);
         }
 
         int hx = (int)((s->x[0] - camx) * sc + hw), hy = (int)((s->y[0] - camy) * sc + hh);
@@ -572,27 +588,4 @@ static void render(void)
     if (!sn[0].alive) {
         int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
         fill_rect((int)W / 2 - bw / 2, (int)H / 2 - bh / 2, bw, bh, 0x00000000);
-        draw_text("GAME OVER", (int)W / 2 - text_width("GAME OVER", ui * 2) / 2, (int)H / 2 - bh / 2 + 24, ui * 2, 0x00FF4D4D);
-        if (dead_t > 60)
-            draw_text("PRESS X TO RESPAWN", (int)W / 2 - text_width("PRESS X TO RESPAWN", ui) / 2, (int)H / 2 + ui * 3, ui, 0x00FFFFFF);
-    }
-}
-
-int main(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    init_screen();
-    ioPadInit(7);
-    sysUtilRegisterCallback(0, sysutil_cb, NULL);
-    srand(20261109);
-    init_game();
-
-    while (running) {
-        sysUtilCheckCallback();
-        read_pad();
-        update_game();
-        render();
-        present();
-    }
-    return 0;
-}
+        draw_text("GAME OVER", (int)W / 2 - text_width("GAME OVER", ui * 2) / 2, (int)H / 2 - b
