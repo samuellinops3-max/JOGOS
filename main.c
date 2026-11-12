@@ -1,4 +1,4 @@
-// Cobra Arena - Controlo L3 e Render Perfeito para PS3 (PSL1GHT)
+// Cobra Arena - L3 Suave, Sem Tremidas e Hotdogs para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,7 +177,8 @@ static Pellet pel[NPEL];
 static int pelrot = 0, dead_t = 0, x_prev = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
 
-static float input_dx = 1.0f, input_dy = 0.0f;
+static float player_target_ang = 0.0f;
+static int has_player_input = 0;
 static int p_boost = 0, p_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
@@ -269,7 +270,9 @@ static void update_snake(int i)
     if (s->immune > 0) s->immune--;
 
     if (i == 0) {
-        s->tgt = atan2f(input_dy, input_dx);
+        if (has_player_input) {
+            s->tgt = player_target_ang;
+        }
         s->boost = p_boost;
     } else {
         bot_think(i);
@@ -279,8 +282,8 @@ static void update_snake(int i)
     float d = s->tgt - s->ang;
     while (d > PI) d -= 2 * PI;
     while (d < -PI) d += 2 * PI;
-    if (d > 0.1f) d = 0.1f;
-    if (d < -0.1f) d = -0.1f;
+    if (d > 0.12f) d = 0.12f;
+    if (d < -0.12f) d = -0.12f;
     s->ang += d;
 
     float sp = 3.5f;
@@ -294,13 +297,16 @@ static void update_snake(int i)
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
     
-    for (int j = 1; j < s->len; j++) {
-        float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
-        float dd = sqrtf(dx * dx + dy * dy);
-        if (dd > 5.0f) {
-            float f = (dd - 5.0f) / dd;
-            s->x[j] += dx * f;
-            s->y[j] += dy * f;
+    // Múltiplas passagens de física para eliminar totalmente as tremidas do corpo
+    for (int iter = 0; iter < 3; iter++) {
+        for (int j = 1; j < s->len; j++) {
+            float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
+            float dd = sqrtf(dx * dx + dy * dy);
+            if (dd > 5.0f) {
+                float f = (dd - 5.0f) / dd;
+                s->x[j] += dx * f * 0.5f;
+                s->y[j] += dy * f * 0.5f;
+            }
         }
     }
 
@@ -351,25 +357,24 @@ static void read_pad(void)
     padInfo info;
     padData d;
     p_boost = p_x = 0;
+    has_player_input = 0;
     
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
         
-        int lx = (int)d.ANA_L_H - 128;
-        int ly = (int)d.ANA_L_V - 128;
-        
-        float ax = (float)lx / 128.0f;
-        float ay = (float)ly / 128.0f;
+        float ax = ((int)d.ANA_L_H - 128) / 128.0f;
+        float ay = ((int)d.ANA_L_V - 128) / 128.0f;
         
         if (d.BTN_LEFT) ax = -1.0f;
         if (d.BTN_RIGHT) ax = 1.0f;
         if (d.BTN_UP) ay = -1.0f;
         if (d.BTN_DOWN) ay = 1.0f;
         
-        if (ax > 0.15f || ax < -0.15f || ay > 0.15f || ay < -0.15f) {
-            input_dx = ax;
-            input_dy = ay;
+        float mag = sqrtf(ax * ax + ay * ay);
+        if (mag > 0.15f) {
+            player_target_ang = atan2f(ay, ax);
+            has_player_input = 1;
         }
         
         p_boost = d.BTN_CROSS;
@@ -496,12 +501,9 @@ static void render(void)
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    
-    // Chamadas explícitas para evitar erros de funções não utilizadas no build
     init_screen();
     ioPadInit(7);
     sysUtilRegisterCallback(0, sysutil_cb, NULL);
-    
     srand(20261109);
     init_game();
 
@@ -510,7 +512,7 @@ int main(int argc, char **argv)
         read_pad();
         update_game();
         render();
-        present(); // Chamado explicitamente aqui
+        present();
     }
     return 0;
 }
