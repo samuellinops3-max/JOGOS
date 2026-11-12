@@ -189,7 +189,7 @@ static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 static float radius_of(const Snake *s)
 {
     int l = s->len > 300 ? 300 : s->len;
-    return 11.0f + l * 0.04f; // Cobras ficam visivelmente mais grossas
+    return 11.0f + l * 0.04f;
 }
 
 static void add_pellet(float x, float y, int size)
@@ -213,11 +213,10 @@ static void spawn_snake(int i)
     s->ang = frand() * 2 * PI;
     s->tgt = s->ang;
     
-    // Bots começam com tamanhos variados (alguns bem gordos/grandes)
     if (i == 0) {
-        s->len = 25; // Jogador começa com bom tamanho
+        s->len = 25;
     } else {
-        s->len = 20 + (rand() % 70); // Bots variam de médios a gigantes
+        s->len = 20 + (rand() % 70);
     }
 
     for (int j = 0; j < s->len; j++) {
@@ -225,13 +224,12 @@ static void spawn_snake(int i)
         s->y[j] = y - sinf(s->ang) * 5.0f * j;
     }
     s->alive = 1; s->respawn = 0; s->boost = 0; s->grow = 0; s->tick = 0;
-    s->col = palette[(i + rand()) % 8]; // Cor aleatória e distinta a cada nascimento
+    s->col = palette[(i + rand()) % 8];
 }
 
 static void kill_snake(int i)
 {
     Snake *s = &sn[i];
-    // Solta muitos pellets nutritivos ao morrer (estilo slither.io)
     for (int j = 0; j < s->len; j += 2)
         add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
     s->alive = 0;
@@ -245,7 +243,6 @@ static void bot_think(int i)
     float hx = s->x[0], hy = s->y[0];
     s->tgt += (frand() - 0.5f) * 0.3f;
 
-    // IA melhorada: procura pellets próximos ativamente
     if (s->tick % 5 == 0) {
         float best = 500.0f * 500.0f;
         int bi = -1;
@@ -257,7 +254,6 @@ static void bot_think(int i)
         if (bi >= 0) s->tgt = atan2f(pel[bi].y - hy, pel[bi].x - hx);
     }
 
-    // Evitar sair das bordas do mapa
     if (hx < 400 || hx > WORLD - 400 || hy < 400 || hy > WORLD - 400)
         s->tgt = atan2f(WORLD / 2 - hy, WORLD / 2 - hx);
 }
@@ -326,7 +322,6 @@ static void update_snake(int i)
     }
     if (s->len >= MAXSEG) s->grow = 0;
 
-    // Colisão com outras cobras
     for (int o = 0; o < NSN; o++) {
         if (o == i || !sn[o].alive) continue;
         float lim = (rs + radius_of(&sn[o])) * 0.7f;
@@ -355,7 +350,6 @@ static void read_pad(void)
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
-        // Leitura precisa do analógico esquerdo com zona morta ajustada
         float ax = ((int)d.ANA_L_H - 128) / 128.0f;
         float ay = ((int)d.ANA_L_V - 128) / 128.0f;
         if (d.BTN_LEFT) ax = -1;
@@ -366,7 +360,6 @@ static void read_pad(void)
         pad_ax = ax; pad_ay = ay;
         pad_mag = sqrtf(ax * ax + ay * ay);
         
-        // Turbo atribuído firmemente ao botão X (CROSS)
         pad_boost = d.BTN_CROSS;
         pad_x = d.BTN_CROSS;
     }
@@ -399,9 +392,8 @@ static void render(void)
     float sc = (float)W / 1280.0f;
     float hw = W / 2.0f, hh = H / 2.0f;
     u32 n = W * H;
-    for (u32 i = 0; i < n; i++) back[i] = 0x000B1018; // Fundo escuro elegante estilo slither
+    for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
 
-    /* bordas da arena */
     int sx0 = (int)((0 - camx) * sc + hw), sx1 = (int)((WORLD - camx) * sc + hw);
     int sy0 = (int)((0 - camy) * sc + hh), sy1 = (int)((WORLD - camy) * sc + hh);
     u32 red = 0x004A0E15;
@@ -410,7 +402,6 @@ static void render(void)
     if (sy0 > 0) fill_rect(0, 0, W, sy0, red);
     if (sy1 < (int)H) fill_rect(0, sy1, W, H - sy1, red);
 
-    /* grelha de fundo para referência de movimento */
     float gx0 = floorf((camx - hw / sc) / 120.0f) * 120.0f;
     float gy0 = floorf((camy - hh / sc) / 120.0f) * 120.0f;
     for (float gx = gx0; gx < camx + hw / sc; gx += 120.0f) {
@@ -421,38 +412,33 @@ static void render(void)
         }
     }
 
-    /* desenhar pellets */
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
         circle(px, py, (int)((3 + pel[k].size * 2) * sc), pel[k].col);
     }
 
-    /* desenhar cobras (estilo corpo conectado slither.io) */
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
         int r = (int)(radius_of(s) * sc);
         u32 dark = (s->col >> 1) & 0x007F7F7F;
         
-        // Corpo em formato de gomos unidos
         for (int j = s->len - 1; j >= 0; j--) {
             int px = (int)((s->x[j] - camx) * sc + hw), py = (int)((s->y[j] - camy) * sc + hh);
             circle(px, py, r, (j % 4 < 2) ? s->col : dark);
         }
         
-        // Cabeça detalhada com olhos
         int hx = (int)((s->x[0] - camx) * sc + hw), hy = (int)((s->y[0] - camy) * sc + hh);
-        circle(hx, py = hy, r + 1, s->col);
+        circle(hx, hy, r + 1, s->col);
         for (int e = -1; e <= 1; e += 2) {
             int ex = hx + (int)(cosf(s->ang + e * 0.7f) * r * 0.65f);
             int ey = hy + (int)(sinf(s->ang + e * 0.7f) * r * 0.65f);
-            circle(ex, ey, r * 38 / 100 + 1, 0x00FFFFFF); // Olho branco
-            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 18 / 100 + 1, 0x00000000); // Pupila preta
+            circle(ex, ey, r * 38 / 100 + 1, 0x00FFFFFF);
+            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 18 / 100 + 1, 0x00000000);
         }
     }
 
-    /* HUD */
     char buf[32];
     int ui = (int)(4 * sc + 0.5f);
     if (ui < 3) ui = 3;
