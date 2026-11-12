@@ -1,4 +1,4 @@
-// Cobra Arena - Slither.io Final Ultra Estável para PS3 (PSL1GHT)
+// Cobra Arena - Controlo Dual (Setinhas + Analógico L3) para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +29,7 @@ typedef struct {
 
 typedef struct {
     float x, y;
-    int size, active, type;
+    int size, active;
     u32 col;
 } Pellet;
 
@@ -177,8 +177,7 @@ static Pellet pel[NPEL];
 static int pelrot = 0, dead_t = 0, x_prev = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
 
-// Controlo blindado e limpo
-static float player_angle = 0.0f;
+static float player_target_ang = 0.0f;
 static int p_boost = 0, p_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
@@ -189,14 +188,13 @@ static float radius_of(const Snake *s)
     return 12.0f + l * 0.05f;
 }
 
-static void add_pellet(float x, float y, int size, int type)
+static void add_pellet(float x, float y, int size)
 {
     for (int k = 0; k < NPEL; k++) {
         int i = (pelrot + k) % NPEL;
         if (!pel[i].active) {
             pel[i].x = x; pel[i].y = y; pel[i].size = size; pel[i].active = 1;
-            pel[i].type = type;
-            pel[i].col = type == 1 ? 0x00FFD23F : palette[rand() % 8];
+            pel[i].col = palette[rand() % 8];
             pelrot = (i + 1) % NPEL;
             return;
         }
@@ -213,7 +211,7 @@ static void spawn_snake(int i)
     
     if (i == 0) {
         s->len = 30;
-        s->immune = 180; // 3 segundos de imunidade no spawn
+        s->immune = 180;
     } else {
         s->len = 25 + (rand() % 70);
         s->immune = 0;
@@ -232,7 +230,7 @@ static void kill_snake(int i)
     Snake *s = &sn[i];
     if (i == 0 && s->immune > 0) return;
     for (int j = 0; j < s->len; j += 2)
-        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2, rand() % 5 == 0 ? 1 : 0);
+        add_pellet(s->x[j] + (frand() - 0.5f) * 15, s->y[j] + (frand() - 0.5f) * 15, 2);
     s->alive = 0;
     s->respawn = 180;
     if (i == 0) dead_t = 0;
@@ -270,14 +268,13 @@ static void update_snake(int i)
     if (s->immune > 0) s->immune--;
 
     if (i == 0) {
-        s->tgt = player_angle;
+        s->tgt = player_target_ang;
         s->boost = p_boost;
     } else {
         bot_think(i);
         s->boost = (s->len > 40 && (s->tick / 180) % 4 == 0) ? 1 : 0;
     }
 
-    // Suavização rigorosa da rotação para acabar com a tremedeira da cabeça
     float d = s->tgt - s->ang;
     while (d > PI) d -= 2 * PI;
     while (d < -PI) d += 2 * PI;
@@ -290,13 +287,12 @@ static void update_snake(int i)
         sp = 6.0f;
         if (s->tick % 10 == 0) {
             s->len--;
-            add_pellet(s->x[s->len], s->y[s->len], 1, 0);
+            add_pellet(s->x[s->len], s->y[s->len], 1);
         }
     }
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
     
-    // Múltiplas passagens de física sem lag para endireitar o corpo perfeitamente
     for (int iter = 0; iter < 2; iter++) {
         for (int j = 1; j < s->len; j++) {
             float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
@@ -317,7 +313,7 @@ static void update_snake(int i)
         float dx = pel[k].x - s->x[0], dy = pel[k].y - s->y[0];
         if (dx * dx + dy * dy < er * er) {
             pel[k].active = 0;
-            int gain = pel[k].type == 1 ? 4 : pel[k].size;
+            int gain = pel[k].size;
             s->grow += gain;
             s->score += gain * 10;
         }
@@ -346,7 +342,7 @@ static void update_snake(int i)
 static void init_game(void)
 {
     memset(pel, 0, sizeof(pel));
-    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0), rand() % 5 == 0 ? 1 : 0);
+    for (int k = 0; k < NPEL; k++) add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
     for (int i = 0; i < NSN; i++) { sn[i].score = 0; spawn_snake(i); }
     dead_t = 0;
 }
@@ -362,26 +358,38 @@ static void read_pad(void)
     if (info.status[0]) {
         ioPadGetData(0, &d);
         
-        // Leitura limpa do analógico L3 com zona morta rigorosa para evitar bloqueios
-        float ax = ((int)d.ANA_L_H - 128) / 128.0f;
-        float ay = ((int)d.ANA_L_V - 128) / 128.0f;
+        // 1. Prioridade às Setinhas (D-PAD) para controlo direto e sem falhas
+        int dpad_used = 0;
+        float target = player_target_ang;
         
-        if (d.BTN_LEFT) ax = -1.0f;
-        if (d.BTN_RIGHT) ax = 1.0f;
-        if (d.BTN_UP) ay = -1.0f;
-        if (d.BTN_DOWN) ay = 1.0f;
-        
-        float mag = sqrtf(ax * ax + ay * ay);
-        if (mag > 0.18f) {
-            player_angle = atan2f(ay, ax);
+        if (d.BTN_LEFT)  { target = PI;       dpad_used = 1; }
+        if (d.BTN_RIGHT) { target = 0.0f;     dpad_used = 1; }
+        if (d.BTN_UP)    { target = -PI / 2.0f; dpad_used = 1; }
+        if (d.BTN_DOWN)  { target = PI / 2.0f;  dpad_used = 1; }
+
+        if (dpad_used) {
+            player_target_ang = target;
+        } else {
+            // 2. Se as setinhas não forem usadas, lê o Analógico L3 com zona morta limpa
+            float ax = ((int)d.ANA_L_H - 128) / 128.0f;
+            float ay = ((int)d.ANA_L_V - 128) / 128.0f;
+            float mag = sqrtf(ax * ax + ay * ay);
+            if (mag > 0.18f) {
+                player_target_ang = atan2f(ay, ax);
+            }
         }
         
-        // Turbo só ativa se o botão X estiver explicitamente premido
-        if (d.BTN_CROSS) {
+        // Turbo exclusivamente no botão R1
+        if (d.BTN_R1) {
             p_boost = 1;
-            p_x = 1;
         } else {
             p_boost = 0;
+        }
+
+        // Botão X apenas para renascer
+        if (d.BTN_CROSS) {
+            p_x = 1;
+        } else {
             p_x = 0;
         }
     }
@@ -394,9 +402,8 @@ static void update_game(void)
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
     for (int n = 0; n < 3 && count < NPEL - 50; n++, count++)
-        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0), rand() % 5 == 0 ? 1 : 0);
+        add_pellet(frand() * WORLD, frand() * WORLD, 1 + (rand() % 3 == 0));
 
-    // Suavização do movimento da câmara para eliminar qualquer lag visual
     if (sn[0].alive) {
         camx += (sn[0].x[0] - camx) * 0.2f;
         camy += (sn[0].y[0] - camy) * 0.2f;
@@ -434,19 +441,13 @@ static void render(void)
         }
     }
 
-    // Desenhar Comida / Hotdogs 🌭
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw);
         int py = (int)((pel[k].y - camy) * sc + hh);
         if (px >= -15 && px < (int)W + 15 && py >= -15 && py < (int)H + 15) {
-            if (pel[k].type == 1) {
-                fill_rect(px - 6, py - 2, 12, 5, 0x00FF9F43); 
-                fill_rect(px - 4, py - 1, 8, 2, 0x00FF4D4D);  
-            } else {
-                circle(px, py, (int)((4 + pel[k].size * 2) * sc), pel[k].col);
-                circle(px, py, (int)(2 * sc), 0x00FFFFFF);
-            }
+            circle(px, py, (int)((4 + pel[k].size * 2) * sc), pel[k].col);
+            circle(px, py, (int)(2 * sc), 0x00FFFFFF);
         }
     }
 
@@ -494,7 +495,7 @@ static void render(void)
     sprintf(buf, "%d", sn[0].score);
     draw_text(buf, 24, 20 + 7 * ui, ui + 2, 0x00FFD23F);
 
-    draw_text("X: TURBO", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
+    draw_text("R1: TURBO  |  SETINHAS OU L3: MOVER", 24, (int)H - 8 * ui, ui, 0x0000E5C0);
 
     if (!sn[0].alive) {
         int bw = text_width("GAME OVER", ui * 2) + 80, bh = 16 * ui + 40;
