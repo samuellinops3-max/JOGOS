@@ -17,7 +17,7 @@
 #define WORLD  6000.0f
 #define MAXSEG 500
 #define NSN    12
-#define NPEL   1200     // Muito mais comida espalhada pelo mapa
+#define NPEL   1200
 #define PI     3.14159265f
 
 typedef struct {
@@ -181,11 +181,10 @@ static int pad_boost = 0, pad_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 
-// Raio maior para as cobras ficarem bem gordas e encorpadas como no Slither.io
 static float radius_of(const Snake *s)
 {
     int l = s->len > 300 ? 300 : s->len;
-    return 16.0f + l * 0.05f; 
+    return 16.0f + l * 0.05f;
 }
 
 static void add_pellet(float x, float y, int size)
@@ -208,7 +207,7 @@ static void spawn_snake(int i)
     float y = 800.0f + frand() * (WORLD - 1600.0f);
     s->ang = frand() * 2 * PI;
     s->tgt = s->ang;
-    
+
     if (i == 0) {
         s->len = 25;
     } else {
@@ -263,7 +262,8 @@ static void update_snake(int i)
     }
     s->tick++;
     if (i == 0) {
-        if (pad_mag > 0.15f) s->tgt = atan2f(pad_ay, pad_ax);
+        // Só muda a direção se o analógico/direcional estiver realmente sendo usado
+        if (pad_mag > 0.25f) s->tgt = atan2f(pad_ay, pad_ax);
         s->boost = pad_boost;
     } else {
         bot_think(i);
@@ -276,6 +276,9 @@ static void update_snake(int i)
     if (d > 0.08f) d = 0.08f;
     if (d < -0.08f) d = -0.08f;
     s->ang += d;
+    // Mantém o ângulo sempre num intervalo seguro
+    if (s->ang > PI) s->ang -= 2 * PI;
+    if (s->ang < -PI) s->ang += 2 * PI;
 
     float sp = 3.2f;
     if (s->boost && s->len > 15) {
@@ -287,7 +290,7 @@ static void update_snake(int i)
     }
     s->x[0] += cosf(s->ang) * sp;
     s->y[0] += sinf(s->ang) * sp;
-    
+
     for (int j = 1; j < s->len; j++) {
         float dx = s->x[j - 1] - s->x[j], dy = s->y[j - 1] - s->y[j];
         float dd = sqrtf(dx * dx + dy * dy);
@@ -337,35 +340,56 @@ static void init_game(void)
     dead_t = 0;
 }
 
+// ---- LEITURA DO CONTROLE (CORRIGIDA) ----
+// Problema original: ioPadGetData às vezes volta com len == 0 (sem dado novo),
+// e os campos vêm zerados. Isso era lido como "analógico todo pra cima/esquerda"
+// e a cobra perdia o controle do nada. Agora só aceitamos leituras válidas e
+// guardamos a última boa.
+static padData last_pad;
+static int have_pad = 0;
+
 static void read_pad(void)
 {
     padInfo info;
     padData d;
     pad_ax = pad_ay = pad_mag = 0;
     pad_boost = pad_x = 0;
+
     ioPadGetInfo(&info);
-    if (info.status[0]) {
-        ioPadGetData(0, &d);
-        float ax = ((int)d.ANA_L_H - 128) / 128.0f;
-        float ay = ((int)d.ANA_L_V - 128) / 128.0f;
-        if (d.BTN_LEFT) ax = -1;
-        if (d.BTN_RIGHT) ax = 1;
-        if (d.BTN_UP) ay = -1;
-        if (d.BTN_DOWN) ay = 1;
-        
-        pad_ax = ax; pad_ay = ay;
-        pad_mag = sqrtf(ax * ax + ay * ay);
-        
-        pad_boost = d.BTN_CROSS;
-        pad_x = d.BTN_CROSS;
+    if (!info.status[0]) { have_pad = 0; return; }
+
+    memset(&d, 0, sizeof(d));
+    ioPadGetData(0, &d);
+    if (d.len > 0) {            // leitura válida
+        last_pad = d;
+        have_pad = 1;
     }
+    if (!have_pad) return;      // ainda sem nenhum dado válido
+    d = last_pad;
+
+    float ax = ((int)d.ANA_L_H - 128) / 128.0f;
+    float ay = ((int)d.ANA_L_V - 128) / 128.0f;
+
+    // Zona morta (analógico do PS3 nunca fica exatamente em 128)
+    if (fabsf(ax) < 0.20f) ax = 0;
+    if (fabsf(ay) < 0.20f) ay = 0;
+
+    if (d.BTN_LEFT)  ax = -1;
+    if (d.BTN_RIGHT) ax = 1;
+    if (d.BTN_UP)    ay = -1;
+    if (d.BTN_DOWN)  ay = 1;
+
+    pad_ax = ax; pad_ay = ay;
+    pad_mag = sqrtf(ax * ax + ay * ay);
+
+    pad_boost = d.BTN_CROSS;
+    pad_x = d.BTN_CROSS;
 }
 
 static void update_game(void)
 {
     for (int i = 0; i < NSN; i++) update_snake(i);
 
-    // Mantém o mapa sempre super recheado com muita comida
     int count = 0;
     for (int k = 0; k < NPEL; k++) count += pel[k].active;
     for (int n = 0; n < 8 && count < NPEL - 20; n++, count++)
@@ -409,36 +433,36 @@ static void render(void)
         }
     }
 
-    // Desenhar comida brilhante estilo Slither.io (com núcleo branco reluzente)
+    // Comida
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw), py = (int)((pel[k].y - camy) * sc + hh);
         if (px >= -20 && px < (int)W + 20 && py >= -20 && py < (int)H + 20) {
-            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col); // Brilho exterior
-            circle(px, py, (int)(2 * sc), 0x00FFFFFF);                   // Miolo branco néon
+            circle(px, py, (int)((5 + pel[k].size * 2) * sc), pel[k].col);
+            circle(px, py, (int)(2 * sc), 0x00FFFFFF);
         }
     }
 
-    // Desenhar cobras gordas, encorpadas e com escamas/anéis unidos
+    // Cobras (otimizado: pula segmentos fora da tela e desenha de 2 em 2)
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
         int r = (int)(radius_of(s) * sc);
         u32 dark = (s->col >> 1) & 0x007F7F7F;
-        
-        for (int j = s->len - 1; j >= 0; j--) {
+
+        for (int j = (s->len - 1) & ~1; j >= 0; j -= 2) {
             int px = (int)((s->x[j] - camx) * sc + hw), py = (int)((s->y[j] - camy) * sc + hh);
+            if (px < -r || px > (int)W + r || py < -r || py > (int)H + r) continue;
             circle(px, py, r, (j % 4 < 2) ? s->col : dark);
         }
-        
-        // Cabeça gorda com olhos bem destacados estilo Slither
+
         int hx = (int)((s->x[0] - camx) * sc + hw), hy = (int)((s->y[0] - camy) * sc + hh);
         circle(hx, hy, r + 2, s->col);
         for (int e = -1; e <= 1; e += 2) {
             int ex = hx + (int)(cosf(s->ang + e * 0.7f) * r * 0.65f);
             int ey = hy + (int)(sinf(s->ang + e * 0.7f) * r * 0.65f);
-            circle(ex, ey, r * 40 / 100 + 1, 0x00FFFFFF); 
-            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 20 / 100 + 1, 0x00000000); 
+            circle(ex, ey, r * 40 / 100 + 1, 0x00FFFFFF);
+            circle(ex + (int)(cosf(s->ang) * r * 15 / 100), ey + (int)(sinf(s->ang) * r * 15 / 100), r * 20 / 100 + 1, 0x00000000);
         }
     }
 
