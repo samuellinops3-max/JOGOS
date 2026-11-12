@@ -1,4 +1,4 @@
-// Cobra Arena - Slither.io style com Minimapa, Emojis/Comida e Controles Perfeitos para PS3 (PSL1GHT)
+// Cobra Arena - Slither.io com L3 Perfeito, Minimapa e Hotdogs para PS3 (PSL1GHT)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +17,7 @@
 #define WORLD  6000.0f
 #define MAXSEG 600
 #define NSN    14       // 1 Jogador + 13 Bots
-#define NPEL   900      // Muito mais comida no mapa
+#define NPEL   900
 #define PI     3.14159265f
 
 typedef struct {
@@ -29,7 +29,7 @@ typedef struct {
 
 typedef struct {
     float x, y;
-    int size, active, type; // 0 = Ponto normal, 1 = Comida/Emoji especial (Hotdog)
+    int size, active, type;
     u32 col;
 } Pellet;
 
@@ -181,8 +181,8 @@ static Pellet pel[NPEL];
 static int pelrot = 0, dead_t = 0, x_prev = 0;
 static float camx = WORLD / 2, camy = WORLD / 2;
 
-// Controles P1
-static float p_ax = 0, p_ay = 0, p_mag = 0;
+// Controlos L3 Diretos
+static float l3_x = 0, l3_y = 0;
 static int p_boost = 0, p_x = 0;
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
@@ -190,7 +190,7 @@ static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 static float radius_of(const Snake *s)
 {
     int l = s->len > 400 ? 400 : s->len;
-    return 12.0f + l * 0.05f; // Cobras mais grossas e encorpadas
+    return 12.0f + l * 0.05f;
 }
 
 static void add_pellet(float x, float y, int size, int type)
@@ -216,9 +216,9 @@ static void spawn_snake(int i)
     s->tgt = s->ang;
     
     if (i == 0) {
-        s->len = 35; // Jogador começa forte
+        s->len = 35;
     } else {
-        s->len = 25 + (rand() % 80); // Bots variados, alguns bem grandes e gordos
+        s->len = 25 + (rand() % 80);
     }
 
     for (int j = 0; j < s->len; j++) {
@@ -270,7 +270,10 @@ static void update_snake(int i)
     s->tick++;
     
     if (i == 0) {
-        if (p_mag > 0.15f) s->tgt = atan2f(p_ay, p_ax); // Mantém direção anterior se soltar o analógico
+        // Se houver movimento no L3, atualiza o alvo instantaneamente
+        if (l3_x != 0 || l3_y != 0) {
+            s->tgt = atan2f(l3_y, l3_x);
+        }
         s->boost = p_boost;
     } else {
         bot_think(i);
@@ -354,17 +357,24 @@ static void read_pad(void)
     ioPadGetInfo(&info);
     if (info.status[0]) {
         ioPadGetData(0, &d);
+        
+        // Leitura direta do Analógico Esquerdo (L3) com zona morta ajustada
         float ax = ((int)d.ANA_L_H - 128) / 128.0f;
         float ay = ((int)d.ANA_L_V - 128) / 128.0f;
-        if (d.BTN_LEFT) ax = -1; if (d.BTN_RIGHT) ax = 1;
-        if (d.BTN_UP) ay = -1; if (d.BTN_DOWN) ay = 1;
         
-        float mag = sqrtf(ax * ax + ay * ay);
-        if (mag > 0.15f) {
-            p_ax = ax; p_ay = ay; p_mag = mag;
-        } else {
-            p_mag = 0; // Se soltar o analógico, mantém a direção anterior perfeitamente!
+        if (d.BTN_LEFT) ax = -1.0f;
+        if (d.BTN_RIGHT) ax = 1.0f;
+        if (d.BTN_UP) ay = -1.0f;
+        if (d.BTN_DOWN) ay = 1.0f;
+        
+        if (ax > -0.1f && ax < 0.1f) ax = 0;
+        if (ay > -0.1f && ay < 0.1f) ay = 0;
+
+        if (ax != 0 || ay != 0) {
+            l3_x = ax;
+            l3_y = ay;
         }
+        
         p_boost = d.BTN_CROSS;
         p_x = d.BTN_CROSS;
     }
@@ -398,7 +408,6 @@ static void render(void)
     u32 n = W * H;
     for (u32 i = 0; i < n; i++) back[i] = 0x000B1018;
 
-    // Bordas vermelhas da arena
     int sx0 = (int)((0 - camx) * sc + hw), sx1 = (int)((WORLD - camx) * sc + hw);
     int sy0 = (int)((0 - camy) * sc + hh), sy1 = (int)((WORLD - camy) * sc + hh);
     u32 red = 0x004A0E15;
@@ -407,7 +416,6 @@ static void render(void)
     if (sy0 > 0) fill_rect(0, 0, W, sy0, red);
     if (sy1 < (int)H) fill_rect(0, sy1, W, H - sy1, red);
 
-    // Grelha do mapa
     float gx0 = floorf((camx - hw / sc) / 120.0f) * 120.0f;
     float gy0 = floorf((camy - hh / sc) / 120.0f) * 120.0f;
     for (float gx = gx0; gx < camx + hw / sc; gx += 120.0f) {
@@ -418,16 +426,14 @@ static void render(void)
         }
     }
 
-    // Desenhar Comida / Guloseimas e Hotdogs (Emoji 🌭 Pixel Art)
     for (int k = 0; k < NPEL; k++) {
         if (!pel[k].active) continue;
         int px = (int)((pel[k].x - camx) * sc + hw);
         int py = (int)((pel[k].y - camy) * sc + hh);
         if (px >= -10 && px < (int)W + 10 && py >= -10 && py < (int)H + 10) {
             if (pel[k].type == 1) {
-                // Desenho pixel art de um Hotdog 🌭 delicioso
-                fill_rect(px - 5, py - 2, 10, 4, 0x00FF9F43); // Pão
-                fill_rect(px - 3, py - 1, 6, 2, 0x00FF4D4D);  // Salsicha
+                fill_rect(px - 5, py - 2, 10, 4, 0x00FF9F43);
+                fill_rect(px - 3, py - 1, 6, 2, 0x00FF4D4D);
             } else {
                 circle(px, py, (int)((4 + pel[k].size * 2) * sc), pel[k].col);
                 circle(px, py, (int)(2 * sc), 0x00FFFFFF);
@@ -435,7 +441,6 @@ static void render(void)
         }
     }
 
-    // Desenhar Cobras
     for (int i = NSN - 1; i >= 0; i--) {
         Snake *s = &sn[i];
         if (!s->alive) continue;
@@ -459,14 +464,11 @@ static void render(void)
         }
     }
 
-    /* ---------- MINIMAPA (RADAR) NO CANTO SUPERIOR DIREITO ---------- */
     int m_w = 160, m_h = 160;
     int m_x = (int)W - m_w - 24, m_y = 24;
-    // Fundo do minimapa
     fill_rect(m_x - 2, m_y - 2, m_w + 4, m_h + 4, 0x00FFFFFF);
     fill_rect(m_x, m_y, m_w, m_h, 0x00141D2B);
 
-    // Pontos no minimapa (Bots e Jogador)
     for (int i = 0; i < NSN; i++) {
         if (!sn[i].alive) continue;
         int mx = m_x + (int)((sn[i].x[0] / WORLD) * m_w);
@@ -475,7 +477,6 @@ static void render(void)
         fill_rect(mx - 1, my - 1, 3, 3, mcol);
     }
 
-    /* HUD */
     char buf[32];
     int ui = (int)(4 * sc + 0.5f);
     if (ui < 3) ui = 3;
