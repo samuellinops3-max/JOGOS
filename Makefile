@@ -1,38 +1,90 @@
+#---------------------------------------------------------------------------------
+# Makefile - Cobra Arena (PS3 Homebrew / PSL1GHT + SDL 1.2)
+#---------------------------------------------------------------------------------
+.SUFFIXES:
+
 ifeq ($(strip $(PSL1GHT)),)
-$(error "Defina a variavel PSL1GHT")
+$(error "Configure a variavel de ambiente PSL1GHT antes de compilar.")
 endif
+
 include $(PSL1GHT)/ppu_rules
 
-.DEFAULT_GOAL := all
+#---------------------------------------------------------------------------------
+# Configuracoes do Projeto
+#---------------------------------------------------------------------------------
+TARGET      := cobra_arena
+BUILD       := build
+SOURCES     := .
+INCLUDES    := .
 
-TARGET    := cobra
-TITLE     := Cobra Arena
-APPID     := COBR00001
-CONTENTID := UP0001-$(APPID)_00-0000000000000000
-SFOXML    := sfo.xml
-PORTLIBS  := $(PS3DEV)/portlibs/ppu
+# Configuracoes do PKG (caso rode make pkg)
+TITLE       := Cobra Arena
+APPID       := SLITHER01
+CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 
-MACHDEP := -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections
-CFLAGS  := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PSL1GHT)/ppu/include -I$(PORTLIBS)/include
-LDFLAGS := $(MACHDEP) -L$(PSL1GHT)/ppu/lib -L$(PORTLIBS)/lib
-LIBS    := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
+#---------------------------------------------------------------------------------
+# Flags de Compilacao (Otimizado para 60 FPS no Cell/PPU)
+#---------------------------------------------------------------------------------
+CFLAGS      := -O3 -Wall -ffast-math -mcpu=cell $(MACHDEP) $(INCLUDE)
+CXXFLAGS    := $(CFLAGS)
+LDFLAGS     := $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-all: $(TARGET).pkg
+#---------------------------------------------------------------------------------
+# Bibliotecas (SDL 1.2 + Controles + Sistema PS3 + Matematica)
+#---------------------------------------------------------------------------------
+LIBS        := -lSDL -laudio -lio -lgcm_sys -lreality -lsysutil -lsysmodule -lm
 
-main.o: main.c
-	$(CC) $(CFLAGS) -c $< -o $@
+#---------------------------------------------------------------------------------
+# Caminhos de Cabecalhos e Bibliotecas do PSL1GHT / Portlibs
+#---------------------------------------------------------------------------------
+LIBDIRS     := $(PORTLIBS) $(PSL1GHT)
 
-$(TARGET).elf: main.o
-	$(CC) $(LDFLAGS) -o $@ $< $(LIBS)
+#---------------------------------------------------------------------------------
+# Regras Automaticas de Compilacao
+#---------------------------------------------------------------------------------
+ifneq ($(BUILD),$(notdir $(CURDIR)))
 
-$(TARGET).pkg: $(TARGET).elf ICON0.PNG $(SFOXML)
-	rm -rf pkg
-	mkdir -p pkg/USRDIR
-	cp ICON0.PNG pkg/ICON0.PNG
-	$(PS3DEV)/bin/sprxlinker $(TARGET).elf
-	$(PS3DEV)/bin/make_self_npdrm $(TARGET).elf pkg/USRDIR/EBOOT.BIN $(CONTENTID)
-	$(PS3DEV)/bin/sfo.py --title "$(TITLE)" --appid "$(APPID)" -f $(SFOXML) pkg/PARAM.SFO
-	$(PS3DEV)/bin/pkg.py --contentid $(CONTENTID) pkg/ $@
+export OUTPUT   := $(CURDIR)/$(TARGET)
+export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
+export DEPSDIR  := $(CURDIR)/$(BUILD)
+
+CFILES      := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
+CPPFILES    := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+SFILES      := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
+
+export OFILES   := $(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
+export INCLUDE  := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
+                   $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+                   $(foreach dir,$(LIBDIRS),-I$(dir)/include/SDL) \
+                   -I$(CURDIR)/$(BUILD)
+
+export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
+
+.PHONY: $(BUILD) clean pkg
+
+$(BUILD):
+	@[ -d $@ ] || mkdir -p $@
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 clean:
-	rm -rf pkg *.o *.elf *.self *.pkg
+	@echo Limpando arquivos de compilacao...
+	@rm -fr $(BUILD) $(TARGET).elf $(TARGET).self $(TARGET).pkg
+
+pkg: $(BUILD)
+	@echo Gerando pacote PKG...
+	@make_self_npdrm $(OUTPUT).elf $(OUTPUT).self $(CONTENTID)
+	@mkdir -p pkg/USRDIR
+	@cp $(OUTPUT).self pkg/USRDIR/EBOOT.BIN
+	@sfo.py --title "$(TITLE)" --appid "$(APPID)" -f $(PSL1GHT)/bin/sfo.xml pkg/PARAM.SFO
+	@pkg.py --contentid $(CONTENTID) pkg/ $(OUTPUT).pkg
+
+else
+
+DEPENDS := $(OFILES:.o=.d)
+
+$(OUTPUT).self: $(OUTPUT).elf
+$(OUTPUT).elf: $(OFILES)
+
+-include $(DEPENDS)
+
+endif
