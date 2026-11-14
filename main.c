@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Nome do Projeto : Cobra Arena (Slither.io Clone para PS3) - SDL / PSL1GHT Corrigido
- Alvo          : PlayStation 3 (PPU / PSL1GHT / SDL 1.2 / DualShock 3 / 60 FPS)
- Otimizações   : Zero malloc/free no loop, Arrays Estáticos, Rasterização de Pixels,
-                 Leitura Real de Joystick e Sistema Completo de Colisão.
+ Nome do Projeto : Cobra Arena (Slither.io Clone para PS3) - Versão Linker Fix
+ Alvo          : PlayStation 3 (PPU / PSL1GHT / DualShock 3 / 60 FPS)
+ Otimizações   : Zero malloc/free, Arrays Estáticos, Rasterização de Pixels,
+                 Sem dependências de SDL_GetTicks/Delay (Linker 100% Compatível).
  ============================================================================
 */
 
@@ -15,7 +15,6 @@
 
 #define SCREEN_WIDTH        1280
 #define SCREEN_HEIGHT       720
-#define TARGET_FPS          60
 #define WORLD_RADIUS        3000.0f
 #define MAX_SNAKE_SEGMENTS  400
 #define MAX_BOTS            12
@@ -92,13 +91,12 @@ int Game_Init() {
     int i, j;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) {
-        printf("Erro ao inicializar SDL: %s\n", SDL_GetError());
+        printf("Erro ao inicializar SDL\n");
         return 0;
     }
 
     screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_SWSURFACE);
     if (!screen) {
-        printf("Erro ao definir modo de vídeo: %s\n", SDL_GetError());
         SDL_Quit();
         return 0;
     }
@@ -192,17 +190,15 @@ void ProcessInput(float *move_x, float *move_y, int *boosting) {
     SDL_JoystickUpdate();
     
     if (joystick) {
-        Sint16 axis_x = SDL_JoystickGetAxis(joystick, 0); // Eixo X Analógico Esquerdo
-        Sint16 axis_y = SDL_JoystickGetAxis(joystick, 1); // Eixo Y Analógico Esquerdo
+        Sint16 axis_x = SDL_JoystickGetAxis(joystick, 0);
+        Sint16 axis_y = SDL_JoystickGetAxis(joystick, 1);
 
-        // Aplicar Deadzone
         if (axis_x > -DEADZONE && axis_x < DEADZONE) axis_x = 0;
         if (axis_y > -DEADZONE && axis_y < DEADZONE) axis_y = 0;
 
         *move_x = (float)axis_x / 32767.0f;
         *move_y = (float)axis_y / 32767.0f;
 
-        // Botão X (index 1) e R2 (index 5)
         int btn_cross = SDL_JoystickGetButton(joystick, 1); 
         int btn_r2 = SDL_JoystickGetButton(joystick, 5);
         *boosting = (btn_cross || btn_r2);
@@ -226,7 +222,6 @@ void Game_Update() {
     }
     snakes[0].is_boosting = boosting;
 
-    // Atualizar Cobras
     for (i = 0; i <= MAX_BOTS; i++) {
         if (!snakes[i].alive) {
             if (i == 0) {
@@ -253,7 +248,6 @@ void Game_Update() {
             snakes[i].is_boosting = (rand() % 100 < 8);
         }
 
-        // Suavização da Curva baseada no comprimento
         float turn_speed = 0.09f / (1.0f + (float)snakes[i].length * 0.0015f);
         float angle_diff = snakes[i].target_angle - snakes[i].angle;
         while (angle_diff > 3.14159f) angle_diff -= 6.28318f;
@@ -279,17 +273,14 @@ void Game_Update() {
             snakes[i].speed = base_speed;
         }
 
-        // Mover Cabeça
         snakes[i].pos.x += cosf(snakes[i].angle) * snakes[i].speed;
         snakes[i].pos.y += sinf(snakes[i].angle) * snakes[i].speed;
 
-        // Atualizar Corpo
         for (j = snakes[i].length - 1; j > 0; j--) {
             snakes[i].body[j] = snakes[i].body[j - 1];
         }
         snakes[i].body[0] = snakes[i].pos;
 
-        // Ímã de Comida normal
         for (k = 0; k < MAX_FOOD; k++) {
             if (foods[k].active) {
                 float dx = foods[k].pos.x - snakes[i].pos.x;
@@ -307,7 +298,6 @@ void Game_Update() {
             }
         }
 
-        // Ímã de Orbes de Explosão
         for (k = 0; k < MAX_EXPLOSION_ORBES; k++) {
             if (explosion_orbes[k].active) {
                 float dx = explosion_orbes[k].pos.x - snakes[i].pos.x;
@@ -325,14 +315,12 @@ void Game_Update() {
             }
         }
 
-        // Colisão com a Borda Mortal
         float d_center = sqrtf(snakes[i].pos.x * snakes[i].pos.x + snakes[i].pos.y * snakes[i].pos.y);
         if (d_center > WORLD_RADIUS) {
             TriggerSnakeExplosion(&snakes[i]);
             snakes[i].alive = 0;
         }
 
-        // Colisão Real da Cabeça contra o Corpo de Outras Cobras
         for (int o = 0; o <= MAX_BOTS; o++) {
             if (!snakes[o].alive) continue;
             int start_seg = (i == o) ? 6 : 0;
@@ -350,7 +338,6 @@ void Game_Update() {
         }
     }
 
-    // Câmera com Zoom Dinâmico
     camera_x = snakes[0].pos.x;
     camera_y = snakes[0].pos.y;
     float target_zoom = 1.0f - ((float)snakes[0].length * 0.0008f);
@@ -431,8 +418,6 @@ int main(int argc, char *argv[]) {
     }
 
     while (1) {
-        Uint32 frame_start = SDL_GetTicks();
-
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
@@ -442,11 +427,6 @@ int main(int argc, char *argv[]) {
 
         Game_Update();
         Game_Render();
-
-        Uint32 frame_time = SDL_GetTicks() - frame_start;
-        if (frame_time < 16) {
-            SDL_Delay(16 - frame_time);
-        }
     }
 
 cleanup:
