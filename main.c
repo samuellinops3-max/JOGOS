@@ -1,6 +1,6 @@
 /*
  ============================================================================
- Nome do Projeto : Cobra Arena (Slither.io Clone para PS3) - SDL / PSL1GHT Real
+ Nome do Projeto : Cobra Arena (Slither.io Clone para PS3) - SDL / PSL1GHT Corrigido
  Alvo          : PlayStation 3 (PPU / PSL1GHT / SDL 1.2 / DualShock 3 / 60 FPS)
  Otimizações   : Zero malloc/free no loop, Arrays Estáticos, Rasterização de Pixels,
                  Leitura Real de Joystick e Sistema Completo de Colisão.
@@ -12,7 +12,6 @@
 #include <string.h>
 #include <math.h>
 #include <SDL/SDL.h>
-#include <sys/sys.h>
 
 #define SCREEN_WIDTH        1280
 #define SCREEN_HEIGHT       720
@@ -203,7 +202,7 @@ void ProcessInput(float *move_x, float *move_y, int *boosting) {
         *move_x = (float)axis_x / 32767.0f;
         *move_y = (float)axis_y / 32767.0f;
 
-        // Botão X (geralmente index 1 ou 0 dependendo do driver PSL1GHT) e R2 (index 5)
+        // Botão X (index 1) e R2 (index 5)
         int btn_cross = SDL_JoystickGetButton(joystick, 1); 
         int btn_r2 = SDL_JoystickGetButton(joystick, 5);
         *boosting = (btn_cross || btn_r2);
@@ -231,11 +230,9 @@ void Game_Update() {
     for (i = 0; i <= MAX_BOTS; i++) {
         if (!snakes[i].alive) {
             if (i == 0) {
-                // Renascer Jogador instantaneamente se morrer
                 snakes[0].pos.x = 0.0f; snakes[0].pos.y = 0.0f;
                 snakes[0].length = 35; snakes[0].alive = 1;
             } else {
-                // Renascer Bot
                 float angle = ((float)(rand() % 360) * 3.14159f / 180.0f);
                 snakes[i].pos.x = cosf(angle) * 1000.0f;
                 snakes[i].pos.y = sinf(angle) * 1000.0f;
@@ -268,7 +265,6 @@ void Game_Update() {
             snakes[i].speed = base_speed * 1.9f;
             if (rand() % 12 == 0) {
                 snakes[i].length--;
-                // Soltar comida pela cauda
                 for (k = 0; k < MAX_FOOD; k++) {
                     if (!foods[k].active) {
                         foods[k].pos = snakes[i].body[snakes[i].length - 1];
@@ -339,7 +335,6 @@ void Game_Update() {
         // Colisão Real da Cabeça contra o Corpo de Outras Cobras
         for (int o = 0; o <= MAX_BOTS; o++) {
             if (!snakes[o].alive) continue;
-            // Ignorar os primeiros segmentos da própria cobra para evitar auto-colisão imediata na cabeça
             int start_seg = (i == o) ? 6 : 0;
             for (j = start_seg; j < snakes[o].length; j++) {
                 float cx_diff = snakes[i].pos.x - snakes[o].body[j].x;
@@ -367,10 +362,8 @@ void Game_Update() {
 void Game_Render() {
     int i, j;
 
-    // 1. Preencher fundo com #161C22
     SDL_FillRect(screen, NULL, COLOR_BG);
 
-    // 2. Desenhar Grid Hexagonal Dinâmico e Borda do Mundo
     int center_screen_x = SCREEN_WIDTH / 2;
     int center_screen_y = SCREEN_HEIGHT / 2;
 
@@ -394,11 +387,9 @@ void Game_Render() {
         }
     }
 
-    // 3. Desenhar Cobras (Segmentos sobrepostos e olhos)
     for (i = 0; i <= MAX_BOTS; i++) {
         if (!snakes[i].alive) continue;
 
-        // Desenhar do corpo para a cabeça
         for (j = snakes[i].length - 1; j >= 0; j--) {
             int sx = (int)((snakes[i].body[j].x - camera_x) * camera_zoom) + center_screen_x;
             int sy = (int)((snakes[i].body[j].y - camera_y) * camera_zoom) + center_screen_y;
@@ -409,7 +400,6 @@ void Game_Render() {
             }
         }
 
-        // Desenhar Olhos na Cabeça
         int hx = (int)((snakes[i].pos.x - camera_x) * camera_zoom) + center_screen_x;
         int hy = (int)((snakes[i].pos.y - camera_y) * camera_zoom) + center_screen_y;
         float eye_dist = snakes[i].radius * 0.6f * camera_zoom;
@@ -423,18 +413,15 @@ void Game_Render() {
         DrawFilledCircle(screen, eye2_x, eye2_y, 3, 0xFFFFFF);
     }
 
-    // 4. Minimapa Simples (Canto Inferior Direito)
     int map_cx = SCREEN_WIDTH - 120;
     int map_cy = SCREEN_HEIGHT - 120;
     int map_r = 90;
     DrawFilledCircle(screen, map_cx, map_cy, map_r, 0x11161B);
 
-    // Ponto do Jogador no Minimapa
     int player_mx = map_cx + (int)((snakes[0].pos.x / WORLD_RADIUS) * map_r);
     int player_my = map_cy + (int)((snakes[0].pos.y / WORLD_RADIUS) * map_r);
     DrawFilledCircle(screen, player_mx, player_my, 4, 0x00FF66);
 
-    // Atualizar tela do PS3
     SDL_Flip(screen);
 }
 
@@ -443,12 +430,9 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // Loop Principal de Execução a 60 FPS cravados
     while (1) {
         Uint32 frame_start = SDL_GetTicks();
 
-        // Processar eventos do sistema PS3 / SYSUTIL
-        sysUtilCheckCallback();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
@@ -459,7 +443,6 @@ int main(int argc, char *argv[]) {
         Game_Update();
         Game_Render();
 
-        // Controle de Framerate (60 FPS ~ 16ms por frame)
         Uint32 frame_time = SDL_GetTicks() - frame_start;
         if (frame_time < 16) {
             SDL_Delay(16 - frame_time);
