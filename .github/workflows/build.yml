@@ -1,28 +1,82 @@
-name: Build PS3 PKG
+name: Compilar PKG
+
 on:
   push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: psl1ght/psl1ght:latest
+    container: ubuntu:20.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
+      - name: Dependencias
         run: |
-          make
-          make_package_npdrm --content-id UP0001-COBRA00001_00-COBRAARENA000001 --k-licensee 0x00000000000000000000000000000000 cobra_arena.self cobra_arena.pkg || true
-          ls -lh
-      - name: Upload PKG
-        uses: actions/upload-artifact@v4
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y curl make git python2 python3 libgmp10 libelf1 zlib1g libssl1.1 bzip2 xz-utils
+          ln -sf /usr/bin/python2 /usr/bin/python
+
+      - uses: actions/checkout@v4
+
+      - name: Baixar toolchain do PS3
+        run: |
+          curl -sL https://github.com/bucanero/ps3toolchain/releases/download/ubuntu-latest-fad3b5fb/ps3dev-ubuntu-latest-2020-08-31.tar.gz | tar xz -C /opt
+          ls /opt/ps3dev
+          echo "PS3DEV=/opt/ps3dev" >> $GITHUB_ENV
+          echo "PSL1GHT=/opt/ps3dev" >> $GITHUB_ENV
+          echo "/opt/ps3dev/bin" >> $GITHUB_PATH
+          echo "/opt/ps3dev/ppu/bin" >> $GITHUB_PATH
+
+      - name: Gerar icone
+        run: |
+          python3 - <<'PY'
+          import zlib, struct, math
+          W, H = 320, 176
+          # fundo azul escuro
+          # cobra colorida em S: verde, amarelo, rosa
+          cores = [(90,255,110),(255,210,50),(255,90,140),(90,255,110)]
+          raw = b''
+          for y in range(H):
+              raw += b'\x00'
+              for x in range(W):
+                  # fundo
+                  r = 14 + y//6
+                  g = 22 + y//8
+                  b = 48 + y//5
+                  # corpo da cobra - curva em S
+                  for i in range(60):
+                      t = i / 59.0
+                      cx = 40 + t * 240
+                      cy = 88 + int(48 * math.sin(t * 3.14159 * 1.5))
+                      dx = x - cx
+                      dy = y - cy
+                      if dx*dx + dy*dy < 15*15:
+                          c = cores[int(t*3.9) % 4]
+                          r, g, b = c
+                          # brilho
+                          if dy < -5:
+                              r = min(255, r+40); g = min(255, g+40); b = min(255, b+40)
+                          break
+                  # olhinho
+                  if (x-52)**2 + (y-52)**2 < 16:
+                      r,g,b = 255,255,255
+                  if (x-52)**2 + (y-52)**2 < 7:
+                      r,g,b = 10,10,10
+                  # bolinhas de comida
+                  for (fx,fy,fr,fc) in [(270,40,6,(255,220,50)),(280,120,6,(255,90,140)),(30,130,6,(80,220,255))]:
+                      if (x-fx)**2 + (y-fy)**2 < fr*fr:
+                          r,g,b = fc
+                  raw += bytes((r,g,b))
+          def chunk(t, d):
+              c = struct.pack('>I', len(d)) + t + d
+              return c + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+          png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', W, H, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+          open('ICON0.PNG', 'wb').write(png)
+          PY
+
+      - name: Compilar
+        run: make
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: cobra_arena-pkg
-          path: "*.pkg"
-      - name: Upload SELF
-        uses: actions/upload-artifact@v4
-        with:
-          name: cobra_arena-self
-          path: "*.self"
+          name: slither-io-ps3-pkg
+          path: slither.pkg
