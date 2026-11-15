@@ -2,6 +2,7 @@ ifeq ($(strip $(PSL1GHT)),)
 $(error "Defina a variavel PSL1GHT")
 endif
 include $(PSL1GHT)/ppu_rules
+.RECIPEPREFIX = >
 .DEFAULT_GOAL := all
 TARGET    := slither
 TITLE     := SLITHER.IO-PS3
@@ -15,16 +16,16 @@ LDFLAGS := $(MACHDEP) -L$(PSL1GHT)/ppu/lib -L$(PORTLIBS)/lib
 LIBS    := -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
 all: $(TARGET).pkg
 main.o: main.c
-	$(CC) $(CFLAGS) -c $< -o $@
+>$(CC) $(CFLAGS) -c $< -o $@
 $(TARGET).elf: main.o
-	$(CC) $(LDFLAGS) -o $@ $< $(LIBS)
+>$(CC) $(LDFLAGS) -o $@ $< $(LIBS)
 $(TARGET).pkg: $(TARGET).elf ICON0.PNG $(SFOXML)
-	rm -rf pkg
-	mkdir -p pkg/USRDIR
-	cp ICON0.PNG pkg/ICON0.PNG
-	$(PS3DEV)/bin/sprxlinker $(TARGET).elf
-	$(PS3DEV)/bin/make_self_npdrm $(TARGET).elf pkg/USRDIR/EBOOT.BIN $(CONTENTID)
-	$(PS3DEV)/bin/sfo.py -f $(SFOXML) pkg/PARAM.SFO
-	$(PS3DEV)/bin/pkg.py --contentid $(CONTENTID) pkg/ $@
+>rm -rf pkg
+>mkdir -p pkg/USRDIR
+>cp ICON0.PNG pkg/ICON0.PNG
+>$(PS3DEV)/bin/sprxlinker $(TARGET).elf
+>$(PS3DEV)/bin/make_self_npdrm $(TARGET).elf pkg/USRDIR/EBOOT.BIN $(CONTENTID)
+>$(PS3DEV)/bin/sfo.py -f $(SFOXML) pkg/PARAM.SFO
+>$(PS3DEV)/bin/pkg.py --contentid $(CONTENTID) pkg/ $@
 clean:
-	rm -rf pkg *.o *.elf *.self *.pkg
+>rm -rf pkg *.o *.elf *.self *.pkg
