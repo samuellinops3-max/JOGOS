@@ -15,7 +15,7 @@ PORTLIBS  := $(PS3DEV)/portlibs/ppu
 MACHDEP := -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections
 CFLAGS  := -O2 -Wall -mcpu=cell $(MACHDEP) -I$(PSL1GHT)/ppu/include -I$(PORTLIBS)/include
 LDFLAGS := $(MACHDEP) -L$(PSL1GHT)/ppu/lib -L$(PORTLIBS)/lib
-LIBS    := -lSDL -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
+LIBS    := -lSDL -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lsysmodule -lnet -lm
 
 all: $(TARGET).pkg
 
