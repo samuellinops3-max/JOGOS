@@ -4,7 +4,7 @@ endif
 include $(PSL1GHT)/ppu_rules
 .DEFAULT_GOAL := all
 TARGET    := slither
-TITLE     := SLITHER.IO PS3
+TITLE     := SLITHER.IO-PS3
 APPID     := SLITH00001
 CONTENTID := UP0001-$(APPID)_00-0000000000000000
 SFOXML    := sfo.xml
